@@ -18,10 +18,57 @@
 //! Tests for parquet schema handling
 use std::{collections::HashMap, fs, path::Path};
 
+use arrow_array::StringViewArray;
 use tempfile::TempDir;
 
 use super::*;
 use datafusion_common::assert_batches_sorted_eq;
+
+#[tokio::test]
+async fn parquet_read_filter_string_view() {
+    let tmp_dir = TempDir::new().unwrap();
+
+    let values = vec![Some("small"), None, Some("Larger than 12 bytes array")];
+    let c1: ArrayRef = Arc::new(StringViewArray::from_iter(values.iter()));
+    let c2: ArrayRef = Arc::new(StringArray::from_iter(values.iter()));
+
+    let batch =
+        RecordBatch::try_from_iter(vec![("c1", c1.clone()), ("c2", c2.clone())]).unwrap();
+
+    let file_name = {
+        let table_dir = tmp_dir.path().join("parquet_test");
+        std::fs::create_dir(&table_dir).unwrap();
+        let file_name = table_dir.join("part-0.parquet");
+        let mut writer = ArrowWriter::try_new(
+            fs::File::create(&file_name).unwrap(),
+            batch.schema(),
+            None,
+        )
+        .unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+        file_name
+    };
+
+    let ctx = SessionContext::new();
+    ctx.register_parquet("t", file_name.to_str().unwrap(), Default::default())
+        .await
+        .unwrap();
+
+    async fn display_result(sql: &str, ctx: &SessionContext) {
+        let result = ctx.sql(sql).await.unwrap().collect().await.unwrap();
+
+        arrow::util::pretty::print_batches(&result).unwrap();
+
+        for b in result {
+            println!("schema: {:?}", b.schema());
+        }
+    }
+
+    display_result("SELECT * from t", &ctx).await;
+    display_result("SELECT * from t where c1 <> 'small'", &ctx).await;
+    display_result("SELECT * from t where c2 <> 'small'", &ctx).await;
+}
 
 #[tokio::test]
 async fn schema_merge_ignores_metadata_by_default() {
