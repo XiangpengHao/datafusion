@@ -19,10 +19,36 @@
 use std::{collections::HashMap, fs, path::Path};
 
 use arrow_array::StringViewArray;
+use datafusion_physical_plan::{
+    displayable, filter::FilterExec, ExecutionPlan, ExecutionPlanVisitor,
+};
 use tempfile::TempDir;
 
 use super::*;
 use datafusion_common::assert_batches_sorted_eq;
+
+struct FilterExecVisitor {
+    found: bool,
+}
+
+impl FilterExecVisitor {
+    fn new() -> Self {
+        Self { found: false }
+    }
+}
+
+impl ExecutionPlanVisitor for FilterExecVisitor {
+    type Error = datafusion::error::DataFusionError;
+
+    fn pre_visit(&mut self, plan: &dyn ExecutionPlan) -> datafusion::error::Result<bool> {
+        if let Some(filter) = plan.as_any().downcast_ref::<FilterExec>() {
+            self.found = true;
+            println!("Found filter with predicate: {:#?}", filter.predicate());
+            return Ok(false);
+        }
+        Ok(true)
+    }
+}
 
 #[tokio::test]
 async fn parquet_read_filter_string_view() {
@@ -56,6 +82,19 @@ async fn parquet_read_filter_string_view() {
         .unwrap();
 
     async fn display_result(sql: &str, ctx: &SessionContext) {
+        let state = ctx.state();
+        let l_plan = state.create_logical_plan(sql).await.unwrap();
+        println!("logical plan: {}", l_plan.display_indent_schema());
+
+        let df = ctx.sql(sql).await.unwrap();
+        let p_plan = df.create_physical_plan().await.unwrap();
+
+        let mut visitor = FilterExecVisitor::new();
+        datafusion::physical_plan::accept(p_plan.as_ref(), &mut visitor).unwrap();
+        let displayable_p_plan = displayable(p_plan.as_ref());
+
+        println!("physical plan: {}", displayable_p_plan.indent(true));
+
         let result = ctx.sql(sql).await.unwrap().collect().await.unwrap();
 
         arrow::util::pretty::print_batches(&result).unwrap();
@@ -65,9 +104,9 @@ async fn parquet_read_filter_string_view() {
         }
     }
 
-    display_result("SELECT * from t", &ctx).await;
+    // display_result("SELECT * from t", &ctx).await;
     display_result("SELECT * from t where c1 <> 'small'", &ctx).await;
-    display_result("SELECT * from t where c2 <> 'small'", &ctx).await;
+    // display_result("SELECT * from t where c2 <> 'small'", &ctx).await;
 }
 
 #[tokio::test]
