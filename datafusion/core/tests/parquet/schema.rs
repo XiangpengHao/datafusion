@@ -43,7 +43,6 @@ impl ExecutionPlanVisitor for FilterExecVisitor {
     fn pre_visit(&mut self, plan: &dyn ExecutionPlan) -> datafusion::error::Result<bool> {
         if let Some(filter) = plan.as_any().downcast_ref::<FilterExec>() {
             self.found = true;
-            println!("Found filter with predicate: {:#?}", filter.predicate());
             return Ok(false);
         }
         Ok(true)
@@ -105,8 +104,8 @@ async fn parquet_read_filter_string_view() {
     }
 
     // display_result("SELECT * from t", &ctx).await;
-    display_result("SELECT * from t where c1 <> 'small'", &ctx).await;
-    // display_result("SELECT * from t where c2 <> 'small'", &ctx).await;
+    // display_result("SELECT * from t where c1 <> 'small'", &ctx).await;
+    display_result("SELECT * from t where c2 <> 'small'", &ctx).await;
 }
 
 #[tokio::test]

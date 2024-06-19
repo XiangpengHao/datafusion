@@ -44,6 +44,7 @@ use crate::physical_plan::{
     Statistics,
 };
 
+use arrow_schema::Field;
 use datafusion_common::config::TableParquetOptions;
 use datafusion_common::file_options::parquet_writer::ParquetWriterOptions;
 use datafusion_common::stats::Precision;
@@ -451,6 +452,23 @@ async fn fetch_schema(
         file_metadata.schema_descr(),
         file_metadata.key_value_metadata(),
     )?;
+
+    let transformed_fields: Vec<Arc<Field>> = schema
+        .fields
+        .iter()
+        .map(|field| {
+            if field.data_type() == &DataType::Utf8 {
+                Arc::new(Field::new(
+                    field.name(),
+                    DataType::Utf8View,
+                    field.is_nullable(),
+                ))
+            } else {
+                field.clone()
+            }
+        })
+        .collect();
+    let schema = Schema::new_with_metadata(transformed_fields, schema.metadata);
     Ok(schema)
 }
 
