@@ -18,7 +18,7 @@
 use arrow::compute::concat_batches;
 use arrow_array::builder::StringViewBuilder;
 use arrow_array::cast::AsArray;
-use arrow_array::{Array, ArrayRef, RecordBatch, RecordBatchOptions};
+use arrow_array::{Array, ArrayRef, RecordBatch, RecordBatchOptions, StringViewArray};
 use arrow_schema::SchemaRef;
 use std::sync::Arc;
 
@@ -239,6 +239,15 @@ fn gc_string_view_batch(batch: &RecordBatch) -> RecordBatch {
                     }
                 })
                 .sum();
+
+            if ideal_buffer_size == 0 {
+                let views = s.views().clone();
+                let new_array = unsafe {
+                    StringViewArray::new_unchecked(views, vec![], s.nulls().cloned())
+                };
+                return Arc::new(new_array);
+            }
+
             let actual_buffer_size = s.get_buffer_memory_size();
 
             // Re-creating the array copies data and can be time consuming.
@@ -247,17 +256,16 @@ fn gc_string_view_batch(batch: &RecordBatch) -> RecordBatch {
                 // We set the block size to `ideal_buffer_size` so that the new StringViewArray only has one buffer, which accelerate later concat_batches.
                 // See https://github.com/apache/arrow-rs/issues/6094 for more details.
                 let mut builder = StringViewBuilder::with_capacity(s.len());
-                if ideal_buffer_size > 0 {
-                    builder = builder.with_fixed_block_size(ideal_buffer_size as u32);
-                }
-
+                
+                debug_assert!(ideal_buffer_size > 0);
+                builder = builder.with_fixed_block_size(ideal_buffer_size as u32);
                 for v in s.iter() {
                     builder.append_option(v);
                 }
 
                 let gc_string = builder.finish();
 
-                debug_assert!(gc_string.data_buffers().len() <= 1); // buffer count can be 0 if the `ideal_buffer_size` is 0
+                debug_assert_eq!(gc_string.data_buffers().len(), 1); // We are very precise about buffer count/size here.
 
                 Arc::new(gc_string)
             } else {
