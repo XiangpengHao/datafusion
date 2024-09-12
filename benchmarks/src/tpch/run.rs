@@ -279,11 +279,8 @@ impl RunOpt {
                 }
                 "parquet7" => {
                     let path = format!("{path}/{table}");
-
-                    // let os = ctx.runtime_env().object_store(Url::new(path) ).unwrap();
-                    let object_url = ObjectStoreUrl::parse(&path).unwrap();
-                    let object_store =
-                        ctx.runtime_env().object_store(&object_url).unwrap();
+                    let url = ObjectStoreUrl::local_filesystem();
+                    let object_store = ctx.runtime_env().object_store(url).unwrap();
                     let factory = Parquet7FileReaderFactory::new(object_store);
                     let format = ParquetFormat::default()
                         .with_options(ctx.state().table_options().parquet.clone())
@@ -304,7 +301,7 @@ impl RunOpt {
         let config = ListingTableConfig::new(table_path).with_listing_options(options);
 
         let config = match table_format {
-            "parquet" => config.infer_schema(&state).await?,
+            "parquet" | "parquet7" => config.infer_schema(&state).await?,
             "tbl" => config.with_schema(Arc::new(get_tbl_tpch_table_schema(table))),
             "csv" => config.with_schema(Arc::new(get_tpch_table_schema(table))),
             _ => unreachable!(),
