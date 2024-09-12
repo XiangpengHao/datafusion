@@ -31,8 +31,10 @@ use datafusion::datasource::file_format::FileFormat;
 use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
+use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
 use datafusion::datasource::{MemTable, TableProvider};
 use datafusion::error::Result;
+use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
 use datafusion::physical_plan::{collect, displayable};
 use datafusion::prelude::*;
@@ -273,6 +275,19 @@ impl RunOpt {
                         .with_enable_pruning(true)
                         .with_options(ctx.state().table_options().parquet.clone());
 
+                    (Arc::new(format), path, DEFAULT_PARQUET_EXTENSION)
+                }
+                "parquet7" => {
+                    let path = format!("{path}/{table}");
+
+                    // let os = ctx.runtime_env().object_store(Url::new(path) ).unwrap();
+                    let object_url = ObjectStoreUrl::parse(&path).unwrap();
+                    let object_store =
+                        ctx.runtime_env().object_store(&object_url).unwrap();
+                    let factory = Parquet7FileReaderFactory::new(object_store);
+                    let format = ParquetFormat::default()
+                        .with_options(ctx.state().table_options().parquet.clone())
+                        .with_reader(Arc::new(factory));
                     (Arc::new(format), path, DEFAULT_PARQUET_EXTENSION)
                 }
                 other => {
