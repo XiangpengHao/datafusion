@@ -33,7 +33,9 @@ use super::{
 use crate::arrow::array::RecordBatch;
 use crate::arrow::datatypes::{Fields, Schema, SchemaRef};
 use crate::datasource::file_format::file_compression_type::FileCompressionType;
-use crate::datasource::physical_plan::{FileGroupDisplay, FileSinkConfig};
+use crate::datasource::physical_plan::{
+    FileGroupDisplay, FileSinkConfig, ParquetFileReaderFactory,
+};
 use crate::datasource::statistics::{create_max_min_accs, get_col_stats};
 use crate::error::Result;
 use crate::execution::context::SessionState;
@@ -176,6 +178,7 @@ impl Debug for ParquetFormatFactory {
 #[derive(Debug, Default)]
 pub struct ParquetFormat {
     options: TableParquetOptions,
+    reader: Option<Arc<dyn ParquetFileReaderFactory>>,
 }
 
 impl ParquetFormat {
@@ -275,6 +278,12 @@ impl ParquetFormat {
     /// If true, will read binary types as strings. See [`Self::binary_as_string`] for details
     pub fn with_binary_as_string(mut self, binary_as_string: bool) -> Self {
         self.options.global.binary_as_string = binary_as_string;
+        self
+    }
+
+    /// Create a new ParquetFormat with a custom reader
+    pub fn with_reader(mut self, reader: Arc<dyn ParquetFileReaderFactory>) -> Self {
+        self.reader = Some(reader);
         self
     }
 }
@@ -405,6 +414,10 @@ impl FileFormat for ParquetFormat {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let mut builder =
             ParquetExecBuilder::new_with_options(conf, self.options.clone());
+
+        if let Some(reader) = &self.reader {
+            builder = builder.with_parquet_file_reader_factory(reader.clone());
+        }
 
         // If enable pruning then combine the filters to build the predicate.
         // If disable pruning then set the predicate to None, thus readers
