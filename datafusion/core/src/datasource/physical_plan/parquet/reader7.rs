@@ -13,22 +13,27 @@ use std::sync::{Arc, LazyLock, RwLock};
 
 use super::ParquetFileReaderFactory;
 
-static META_DATA_CACHE: LazyLock<RwLock<MetadataCache>> =
-    LazyLock::new(|| RwLock::new(MetadataCache::new()));
+static CACHE: LazyLock<Cache> = LazyLock::new(|| Cache::new());
 
-pub struct MetadataCache {
-    map: HashMap<Path, Arc<ParquetMetaData>>,
+pub struct Cache {
+    metadata_map: RwLock<HashMap<Path, Arc<ParquetMetaData>>>,
+    bytes_map: RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>>,
 }
 
-impl MetadataCache {
+impl Cache {
     fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            metadata_map: RwLock::new(HashMap::new()),
+            bytes_map: RwLock::new(HashMap::new()),
         }
     }
+    
+    pub fn meta_cache() -> &'static RwLock<HashMap<Path, Arc<ParquetMetaData>>> {
+        &CACHE.metadata_map
+    }
 
-    fn get() -> &'static RwLock<MetadataCache> {
-        &*META_DATA_CACHE
+    pub fn bytes_cache() -> &'static RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>> {
+        &CACHE.bytes_map
     }
 }
 
@@ -87,7 +92,54 @@ impl AsyncFileReader for Parquet7FileReader {
     ) -> BoxFuture<'_, parquet::errors::Result<Vec<Bytes>>> {
         let total = ranges.iter().map(|r| r.end - r.start).sum();
         self.file_metrics.bytes_scanned.add(total);
-        self.inner.get_byte_ranges(ranges)
+
+        let cache = Cache::bytes_cache().read().unwrap();
+        let path = self.inner.meta.location.clone();
+
+        let mut cached_bytes = Vec::new();
+        let mut missing_ranges = Vec::new();
+        let mut missing_indices = Vec::new();
+
+        for (i, range) in ranges.iter().enumerate() {
+            let key = (path.clone(), range.clone());
+            if let Some(bytes) = cache.get(&key) {
+                cached_bytes.push((i, bytes.clone()));
+            } else {
+                missing_ranges.push(range.clone());
+                missing_indices.push(i);
+            }
+        }
+
+        drop(cache); // Release the read lock
+
+        if missing_ranges.is_empty() {
+            cached_bytes.sort_by_key(|&(i, _)| i);
+            let result = cached_bytes.into_iter().map(|(_, bytes)| (*bytes).clone()).collect();
+            return async move { Ok(result) }.boxed();
+        }
+
+        let get_bytes = self.inner.get_byte_ranges(missing_ranges);
+        async move {
+            let bytes = get_bytes.await?;
+            let mut cache = Cache::bytes_cache().write().unwrap();
+
+            for (i, byte) in missing_indices.iter().zip(bytes.iter()) {
+                let key = (path.clone(), ranges[*i].clone());
+                cache.entry(key).or_insert_with(|| Arc::new(byte.clone()));
+            }
+
+            drop(cache); // Release the write lock
+
+            let mut result = vec![Bytes::new(); ranges.len()];
+            for (i, bytes) in cached_bytes {
+                result[i] = (*bytes).clone();
+            }
+            for (i, byte) in missing_indices.into_iter().zip(bytes) {
+                result[i] = byte;
+            }
+            Ok(result)
+        }
+        .boxed()
     }
 
     fn get_bytes(
@@ -95,26 +147,48 @@ impl AsyncFileReader for Parquet7FileReader {
         range: Range<usize>,
     ) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         self.file_metrics.bytes_scanned.add(range.end - range.start);
-        self.inner.get_bytes(range)
+        
+        let cache = Cache::bytes_cache().read().unwrap();
+        let path = self.inner.meta.location.clone();
+        let key = (path.clone(), range.clone());
+
+        if let Some(bytes) = cache.get(&key) {
+            let bytes = bytes.clone();
+            return async move { Ok((*bytes).clone()) }.boxed();
+        }
+
+        drop(cache); // Release the read lock
+
+        let get_bytes = self.inner.get_bytes(range.clone());
+        async move {
+            let bytes = get_bytes.await?;
+            let bytes = Arc::new(bytes);
+            let mut cache = Cache::bytes_cache().write().unwrap();
+            cache.entry(key).or_insert(bytes.clone());
+            Ok((*bytes).clone())
+        }
+        .boxed()
     }
 
     fn get_metadata(
         &mut self,
     ) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
-        let cache = MetadataCache::get().read().unwrap();
+        let cache = Cache::meta_cache().read().unwrap();
         let path = &self.inner.meta.location;
 
-        if let Some(meta) = cache.map.get(path) {
+        if let Some(meta) = cache.get(path) {
             let meta = meta.clone();
             return async move { Ok(meta) }.boxed();
         }
+
+        drop(cache);
 
         let path = self.inner.meta.location.clone();
         let get_meta = self.inner.get_metadata();
         async move {
             let meta = get_meta.await?;
-            let mut meta_cache = MetadataCache::get().write().unwrap();
-            meta_cache.map.entry(path).or_insert(meta.clone());
+            let mut cache = Cache::meta_cache().write().unwrap();
+            cache.entry(path).or_insert(meta.clone());
             Ok(meta)
         }
         .boxed()
