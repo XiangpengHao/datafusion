@@ -27,7 +27,7 @@ impl Cache {
             bytes_map: RwLock::new(HashMap::new()),
         }
     }
-    
+
     pub fn meta_cache() -> &'static RwLock<HashMap<Path, Arc<ParquetMetaData>>> {
         &CACHE.metadata_map
     }
@@ -114,7 +114,10 @@ impl AsyncFileReader for Parquet7FileReader {
 
         if missing_ranges.is_empty() {
             cached_bytes.sort_by_key(|&(i, _)| i);
-            let result = cached_bytes.into_iter().map(|(_, bytes)| (*bytes).clone()).collect();
+            let result = cached_bytes
+                .into_iter()
+                .map(|(_, bytes)| (*bytes).clone())
+                .collect();
             return async move { Ok(result) }.boxed();
         }
 
@@ -147,7 +150,7 @@ impl AsyncFileReader for Parquet7FileReader {
         range: Range<usize>,
     ) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         self.file_metrics.bytes_scanned.add(range.end - range.start);
-        
+
         let cache = Cache::bytes_cache().read().unwrap();
         let path = self.inner.meta.location.clone();
         let key = (path.clone(), range.clone());
