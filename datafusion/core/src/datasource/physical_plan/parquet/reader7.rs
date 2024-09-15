@@ -1,41 +1,16 @@
 use crate::datasource::physical_plan::{FileMeta, ParquetFileMetrics};
 use bytes::Bytes;
+use datafusion_execution::cache::cache_unit::Cache37;
 use datafusion_physical_plan::metrics::ExecutionPlanMetricsSet;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use hashbrown::HashMap;
-use object_store::path::Path;
 use object_store::ObjectStore;
 use parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader};
 use parquet::file::metadata::ParquetMetaData;
 use std::ops::Range;
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::Arc;
 
 use super::ParquetFileReaderFactory;
-
-static CACHE: LazyLock<Cache> = LazyLock::new(|| Cache::new());
-
-pub struct Cache {
-    metadata_map: RwLock<HashMap<Path, Arc<ParquetMetaData>>>,
-    bytes_map: RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>>,
-}
-
-impl Cache {
-    fn new() -> Self {
-        Self {
-            metadata_map: RwLock::new(HashMap::new()),
-            bytes_map: RwLock::new(HashMap::new()),
-        }
-    }
-
-    pub fn meta_cache() -> &'static RwLock<HashMap<Path, Arc<ParquetMetaData>>> {
-        &CACHE.metadata_map
-    }
-
-    pub fn bytes_cache() -> &'static RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>> {
-        &CACHE.bytes_map
-    }
-}
 
 /// Doc
 #[derive(Debug)]
@@ -93,7 +68,7 @@ impl AsyncFileReader for Parquet7FileReader {
         let total = ranges.iter().map(|r| r.end - r.start).sum();
         self.file_metrics.bytes_scanned.add(total);
 
-        let cache = Cache::bytes_cache().read().unwrap();
+        let cache = Cache37::bytes_cache().read().unwrap();
         let path = self.inner.meta.location.clone();
 
         let mut cached_bytes = Vec::new();
@@ -124,7 +99,7 @@ impl AsyncFileReader for Parquet7FileReader {
         let get_bytes = self.inner.get_byte_ranges(missing_ranges);
         async move {
             let bytes = get_bytes.await?;
-            let mut cache = Cache::bytes_cache().write().unwrap();
+            let mut cache = Cache37::bytes_cache().write().unwrap();
 
             for (i, byte) in missing_indices.iter().zip(bytes.iter()) {
                 let key = (path.clone(), ranges[*i].clone());
@@ -151,7 +126,7 @@ impl AsyncFileReader for Parquet7FileReader {
     ) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         self.file_metrics.bytes_scanned.add(range.end - range.start);
 
-        let cache = Cache::bytes_cache().read().unwrap();
+        let cache = Cache37::bytes_cache().read().unwrap();
         let path = self.inner.meta.location.clone();
         let key = (path.clone(), range.clone());
 
@@ -166,7 +141,7 @@ impl AsyncFileReader for Parquet7FileReader {
         async move {
             let bytes = get_bytes.await?;
             let bytes = Arc::new(bytes);
-            let mut cache = Cache::bytes_cache().write().unwrap();
+            let mut cache = Cache37::bytes_cache().write().unwrap();
             cache.entry(key).or_insert(bytes.clone());
             Ok((*bytes).clone())
         }
@@ -176,7 +151,7 @@ impl AsyncFileReader for Parquet7FileReader {
     fn get_metadata(
         &mut self,
     ) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
-        let cache = Cache::meta_cache().read().unwrap();
+        let cache = Cache37::meta_cache().read().unwrap();
         let path = &self.inner.meta.location;
 
         if let Some(meta) = cache.get(path) {
@@ -190,7 +165,7 @@ impl AsyncFileReader for Parquet7FileReader {
         let get_meta = self.inner.get_metadata();
         async move {
             let meta = get_meta.await?;
-            let mut cache = Cache::meta_cache().write().unwrap();
+            let mut cache = Cache37::meta_cache().write().unwrap();
             cache.entry(path).or_insert(meta.clone());
             Ok(meta)
         }
