@@ -55,6 +55,7 @@ use datafusion_common::{
     DEFAULT_PARQUET_EXTENSION,
 };
 use datafusion_common_runtime::SpawnedTask;
+use datafusion_execution::cache::cache_unit::Cache37;
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryPool, MemoryReservation};
 use datafusion_execution::TaskContext;
 use datafusion_expr::dml::InsertOp;
@@ -532,12 +533,31 @@ async fn fetch_schema(
     file: &ObjectMeta,
     metadata_size_hint: Option<usize>,
 ) -> Result<Schema> {
+    let path = &file.location;
+    {
+        let cache = Cache37::meta_cache().read().unwrap();
+        if let Some(metadata) = cache.get(path) {
+            let file_metadata = metadata.file_metadata();
+            return parquet_to_arrow_schema(
+                file_metadata.schema_descr(),
+                file_metadata.key_value_metadata(),
+            )
+            .map_err(DataFusionError::ParquetError);
+        }
+    }
+
     let metadata = fetch_parquet_metadata(store, file, metadata_size_hint).await?;
     let file_metadata = metadata.file_metadata();
     let schema = parquet_to_arrow_schema(
         file_metadata.schema_descr(),
         file_metadata.key_value_metadata(),
     )?;
+
+    {
+        let mut cache = Cache37::meta_cache().write().unwrap();
+        cache.insert(path.clone(), Arc::new(metadata));
+    }
+
     Ok(schema)
 }
 
@@ -550,7 +570,21 @@ async fn fetch_statistics(
     file: &ObjectMeta,
     metadata_size_hint: Option<usize>,
 ) -> Result<Statistics> {
+    let path = &file.location;
+    {
+        let cache = Cache37::meta_cache().read().unwrap();
+        if let Some(metadata) = cache.get(path) {
+            return statistics_from_parquet_meta_calc(metadata, table_schema);
+        }
+    }
+
     let metadata = fetch_parquet_metadata(store, file, metadata_size_hint).await?;
+    
+    {
+        let mut cache = Cache37::meta_cache().write().unwrap();
+        cache.insert(path.clone(), Arc::new(metadata.clone()));
+    }
+
     statistics_from_parquet_meta_calc(&metadata, table_schema)
 }
 
