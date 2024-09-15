@@ -15,13 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::sync::Arc;
+use std::ops::Range;
+use std::sync::{Arc, LazyLock, RwLock};
 
 use crate::cache::CacheAccessor;
 
 use datafusion_common::Statistics;
 
 use dashmap::DashMap;
+use hashbrown::HashMap;
 use object_store::path::Path;
 use object_store::ObjectMeta;
 
@@ -154,6 +156,33 @@ impl CacheAccessor<Path, Arc<Vec<ObjectMeta>>> for DefaultListFilesCache {
 
     fn name(&self) -> String {
         "DefaultListFilesCache".to_string()
+    }
+}
+
+use bytes::Bytes;
+
+static CACHE: LazyLock<Cache37> = LazyLock::new(|| Cache37::new());
+use parquet::file::metadata::ParquetMetaData;
+
+pub struct Cache37 {
+    metadata_map: RwLock<HashMap<Path, Arc<ParquetMetaData>>>,
+    bytes_map: RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>>,
+}
+
+impl Cache37 {
+    fn new() -> Self {
+        Self {
+            metadata_map: RwLock::new(HashMap::new()),
+            bytes_map: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn meta_cache() -> &'static RwLock<HashMap<Path, Arc<ParquetMetaData>>> {
+        &CACHE.metadata_map
+    }
+
+    pub fn bytes_cache() -> &'static RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>> {
+        &CACHE.bytes_map
     }
 }
 
