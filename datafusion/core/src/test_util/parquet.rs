@@ -74,6 +74,34 @@ impl ParquetScanOptions {
 }
 
 impl TestParquetFile {
+    /// doc
+    pub fn from_existing(path: PathBuf, schema: SchemaRef) -> Result<Self> {
+        assert!(path.exists());
+
+        let size = std::fs::metadata(&path)?.len() as usize;
+
+        let canonical_path = path.canonicalize()?;
+
+        let object_store_url =
+            ListingTableUrl::parse(canonical_path.to_str().unwrap_or_default())?
+                .object_store();
+
+        let object_meta = ObjectMeta {
+            location: Path::parse(canonical_path.to_str().unwrap_or_default())?,
+            last_modified: Default::default(),
+            size,
+            e_tag: None,
+            version: None,
+        };
+
+        Ok(Self {
+            path,
+            schema,
+            object_store_url,
+            object_meta,
+        })
+    }
+
     /// Creates a new parquet file at the specified location with the
     /// given properties
     pub fn try_new(
