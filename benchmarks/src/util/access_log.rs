@@ -43,6 +43,9 @@ pub struct AccessLogOpt {
     /// Total size of generated dataset. The default scale factor of 1.0 will generate a roughly 1GB parquet file
     #[structopt(long = "scale-factor", default_value = "1.0")]
     scale_factor: f32,
+
+    #[structopt(long = "bloom-filter")]
+    bloom_filter: bool,
 }
 
 impl AccessLogOpt {
@@ -51,12 +54,18 @@ impl AccessLogOpt {
     /// See [`TestParquetFile`] for more details
     pub fn build(self) -> Result<TestParquetFile> {
         let path = self.path.join("logs.parquet");
+        let generator = AccessLogGenerator::new();
+
+        if path.exists() {
+            return TestParquetFile::from_existing(path, generator.schema());
+        }
 
         let mut props_builder = WriterProperties::builder();
 
         if let Some(s) = self.page_size {
             props_builder = props_builder
                 .set_data_page_size_limit(s)
+                .set_bloom_filter_enabled(self.bloom_filter)
                 .set_write_batch_size(s);
         }
 
@@ -64,8 +73,6 @@ impl AccessLogOpt {
             props_builder = props_builder.set_max_row_group_size(s);
         }
         let props = props_builder.build();
-
-        let generator = AccessLogGenerator::new();
 
         let num_batches = 100_f32 * self.scale_factor;
 

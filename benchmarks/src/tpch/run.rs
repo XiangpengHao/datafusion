@@ -92,6 +92,21 @@ pub struct RunOpt {
     /// True by default.
     #[structopt(short = "j", long = "prefer_hash_join", default_value = "true")]
     prefer_hash_join: BoolDefaultTrue,
+
+    /// Row group based pruning
+    #[structopt(long = "pruning")]
+    pruning: BoolDefaultTrue,
+
+    /// Page index
+    #[structopt(long = "page_index")]
+    page_index: BoolDefaultTrue,
+
+    /// Bloom filter pruning
+    #[structopt(long = "bloom_filter")]
+    bloom_filter: BoolDefaultTrue,
+
+    #[structopt(long = "pushdown_filters")]
+    pushdown_filters: bool,
 }
 
 const TPCH_QUERY_START_ID: usize = 1;
@@ -123,6 +138,14 @@ impl RunOpt {
             .config()
             .with_collect_statistics(!self.disable_statistics);
         config.options_mut().optimizer.prefer_hash_join = self.prefer_hash_join;
+
+        let parquet_config = &mut config.options_mut().execution.parquet;
+        parquet_config.schema_force_view_types = self.common.force_view_types;
+        parquet_config.bloom_filter_on_read = self.bloom_filter;
+        parquet_config.pruning = self.pruning;
+        parquet_config.enable_page_index = self.page_index;
+        parquet_config.pushdown_filters = self.pushdown_filters;
+        
         let ctx = SessionContext::new_with_config(config);
 
         // register tables

@@ -19,6 +19,7 @@
 pub mod clickbench;
 pub mod imdb;
 pub mod parquet_filter;
+pub mod parquet37_filter;
 pub mod sort;
 pub mod sort_tpch;
 pub mod tpch;
