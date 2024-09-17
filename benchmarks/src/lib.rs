@@ -18,6 +18,7 @@
 //! DataFusion benchmark runner
 pub mod clickbench;
 pub mod parquet_filter;
+pub mod parquet37_filter;
 pub mod sort;
 pub mod tpch;
 mod util;
