@@ -113,6 +113,8 @@ impl ConvertOpt {
                 "parquet" => {
                     let props = WriterProperties::builder()
                         .set_compression(compression)
+                        .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Page)
+                        .set_bloom_filter_enabled(true)
                         .build();
                     ctx.write_parquet(csv, output_path, Some(props)).await?
                 }
