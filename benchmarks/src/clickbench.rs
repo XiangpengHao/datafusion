@@ -19,6 +19,9 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::util::{BenchmarkRun, CommonOpt};
+use arrow::util::pretty;
+use datafusion::physical_plan::collect;
+use datafusion::physical_plan::display::DisplayableExecutionPlan;
 use datafusion::{
     error::{DataFusionError, Result},
     prelude::SessionContext,
@@ -129,6 +132,7 @@ impl RunOpt {
 
         let iterations = self.common.iterations;
         let mut benchmark_run = BenchmarkRun::new();
+        let debug = self.common.debug;
         for query_id in query_range {
             benchmark_run.start_new_case(&format!("Query {query_id}"));
             let sql = queries.get_query(query_id)?;
@@ -136,10 +140,33 @@ impl RunOpt {
 
             for i in 0..iterations {
                 let start = Instant::now();
-                let results = ctx.sql(sql).await?.collect().await?;
+                // let results = ctx.sql(sql).await?.collect().await?;
+                let plan = ctx.sql(sql).await?;
+                let (state, plan) = plan.into_parts();
+
+                let plan = state.optimize(&plan)?;
+                if debug {
+                    println!("=== Optimized logical plan ===\n{plan}\n");
+                }
+                let physical_plan = state.create_physical_plan(&plan).await?;
+
+                let result = collect(physical_plan.clone(), state.task_ctx()).await?;
+                if debug {
+                    println!(
+                        "=== Physical plan with metrics ===\n{}\n",
+                        DisplayableExecutionPlan::with_metrics(physical_plan.as_ref())
+                            .indent(true)
+                    );
+                    if !result.is_empty() {
+                        // do not call print_batches if there are no batches as the result is confusing
+                        // and makes it look like there is a batch with no columns
+                        pretty::print_batches(&result)?;
+                    }
+                }
+
                 let elapsed = start.elapsed();
                 let ms = elapsed.as_secs_f64() * 1000.0;
-                let row_count: usize = results.iter().map(|b| b.num_rows()).sum();
+                let row_count: usize = result.iter().map(|b| b.num_rows()).sum();
                 println!(
                     "Query {query_id} iteration {i} took {ms:.1} ms and returned {row_count} rows"
                 );
