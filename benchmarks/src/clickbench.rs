@@ -15,8 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::env;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::util::{BenchmarkRun, CommonOpt};
 use arrow::util::pretty;
@@ -28,7 +30,9 @@ use datafusion::{
 };
 use datafusion_common::exec_datafusion_err;
 use datafusion_common::instant::Instant;
+use object_store::aws::AmazonS3Builder;
 use structopt::StructOpt;
+use url::Url;
 
 /// Run the clickbench benchmark
 ///
@@ -181,7 +185,18 @@ impl RunOpt {
     async fn register_hits(&self, ctx: &SessionContext) -> Result<()> {
         let options = Default::default();
         let path = self.path.as_os_str().to_str().unwrap();
-        ctx.register_parquet("hits", path, options)
+        let url = Url::parse(&"minio://parquet-oo").unwrap();
+        let object_store = AmazonS3Builder::new()
+            .with_bucket_name("parquet-oo")
+            .with_endpoint("http://c220g5-110910.wisc.cloudlab.us:9000")
+            .with_allow_http(true)
+            .with_region("us-east-1")
+            .with_access_key_id(env::var("MINIO_ACCESS_KEY_ID").unwrap())
+            .with_secret_access_key(env::var("MINIO_SECRET_ACCESS_KEY").unwrap())
+            .build()?;
+        ctx.register_object_store(&url, Arc::new(object_store));
+
+        ctx.register_parquet("hits", &path, options)
             .await
             .map_err(|e| {
                 DataFusionError::Context(
