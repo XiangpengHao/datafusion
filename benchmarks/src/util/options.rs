@@ -38,6 +38,10 @@ pub struct CommonOpt {
     #[structopt(short, long)]
     pub debug: bool,
 
+    /// If true, will print the result record batch
+    #[structopt(long)]
+    pub print_result: bool,
+
     /// If true, will use StringView/BinaryViewArray instead of String/BinaryArray
     /// when reading ParquetFiles
     #[structopt(long)]
