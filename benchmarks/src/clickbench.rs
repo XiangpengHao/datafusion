@@ -16,11 +16,13 @@
 // under the License.
 
 use std::env;
+use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::util::{BenchmarkRun, CommonOpt};
+use arrow::ipc::reader::FileReader;
 use arrow::util::pretty;
 use datafusion::physical_plan::collect;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
@@ -34,6 +36,10 @@ use object_store::aws::AmazonS3Builder;
 use parquet::arrow::builder::ArrowArrayCache;
 use structopt::StructOpt;
 use url::Url;
+
+use crate::{BenchmarkRun, CommonOpt};
+
+use arrow::ipc::writer::FileWriter;
 
 /// Run the clickbench benchmark
 ///
@@ -76,6 +82,14 @@ pub struct RunOpt {
     /// If present, write results json here
     #[structopt(parse(from_os_str), short = "o", long = "output")]
     output_path: Option<PathBuf>,
+
+    /// Write the answers to a file
+    #[structopt(long)]
+    write_answers: bool,
+
+    /// Check the answers against the stored answers
+    #[structopt(long)]
+    skip_answers: bool,
 }
 
 struct AllQueries {
@@ -104,6 +118,19 @@ impl AllQueries {
                 )
             })
             .map(|s| s.as_str())
+    }
+
+    fn should_check_answer(&self, query_id: usize) -> bool {
+        if query_id == 3 {
+            // Query 3 is a AVG query, which returns a Float64, difficult to compare
+            return false;
+        }
+        let sql = self.get_query(query_id).unwrap();
+        if sql.contains("LIMIT") {
+            // LIMIT is not deterministic, so we cannot compare the results
+            return false;
+        }
+        true
     }
 
     fn min_query_id(&self) -> usize {
@@ -177,8 +204,53 @@ impl RunOpt {
                 if self.common.print_result {
                     pretty::print_batches(&result)?;
                 }
+                if self.write_answers && i == 0 {
+                    let file_path = format!(
+                        "benchmarks/results/clickbench_answers/Q{}.arrow",
+                        query_id
+                    );
+                    std::fs::create_dir_all("benchmarks/results/clickbench_answers")?;
+                    let file = File::create(file_path)?;
+                    let mut writer = std::io::BufWriter::new(file);
+                    let schema = Arc::new(result[0].schema());
+                    let mut arrow_writer = FileWriter::try_new(&mut writer, &schema)?;
 
-                // ArrowArrayCache::get().reset();
+                    for batch in &result {
+                        arrow_writer.write(batch)?;
+                    }
+                    arrow_writer.finish()?;
+                }
+                // Compare results with stored answers
+                if !self.skip_answers
+                    && !self.write_answers
+                    && queries.should_check_answer(query_id)
+                {
+                    let answer_file_path = format!(
+                        "benchmarks/results/clickbench_answers/Q{}.arrow",
+                        query_id
+                    );
+                    let file = File::open(answer_file_path)?;
+                    let reader = std::io::BufReader::new(file);
+                    let mut arrow_reader = FileReader::try_new(reader, None)?;
+
+                    let mut stored_batches = Vec::new();
+                    while let Some(batch) = arrow_reader.next() {
+                        stored_batches.push(batch.unwrap());
+                    }
+
+                    if result.len() != stored_batches.len() {
+                        panic!("Query {} iteration {} result batch count does not match stored answer", query_id, i);
+                    } else {
+                        for (result_batch, stored_batch) in
+                            result.iter().zip(stored_batches.iter())
+                        {
+                            assert_eq!(result_batch, stored_batch);
+                        }
+                        println!("Query {} iteration {} passed", query_id, i);
+                    }
+                } else {
+                    println!("Query {} iteration {} answer not checked", query_id, i);
+                }
 
                 benchmark_run.write_iter(elapsed, row_count);
             }
