@@ -19,4 +19,5 @@ do
     else
         echo "Query $i failed. Check $log_file for details." | tee -a $log_file
     fi
+    rm -rf target/arrow-cache
 done
