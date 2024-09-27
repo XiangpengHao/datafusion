@@ -17,10 +17,12 @@
 
 use datafusion::{error::Result, DATAFUSION_VERSION};
 use datafusion_common::utils::get_available_parallelism;
+use parquet::arrow::builder::CacheStatistics;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use std::{
     collections::HashMap,
+    fs::File,
     path::Path,
     time::{Duration, SystemTime},
 };
@@ -97,6 +99,7 @@ pub struct BenchmarkRun {
     context: RunContext,
     queries: Vec<BenchQuery>,
     current_case: Option<usize>,
+    cache_stats: Option<CacheStatistics>,
 }
 
 impl Default for BenchmarkRun {
@@ -112,6 +115,7 @@ impl BenchmarkRun {
             context: RunContext::new(),
             queries: vec![],
             current_case: None,
+            cache_stats: None,
         }
     }
     /// begin a new case. iterations added after this will be included in the new case
@@ -138,6 +142,10 @@ impl BenchmarkRun {
         }
     }
 
+    pub fn set_cache_stats(&mut self, cache_stats: CacheStatistics) {
+        self.cache_stats = Some(cache_stats);
+    }
+
     /// Stringify data into formatted json
     pub fn to_json(&self) -> String {
         let mut output = HashMap::<&str, Value>::new();
@@ -147,10 +155,32 @@ impl BenchmarkRun {
     }
 
     /// Write data as json into output path if it exists.
-    pub fn maybe_write_json(&self, maybe_path: Option<impl AsRef<Path>>) -> Result<()> {
-        if let Some(path) = maybe_path {
+    pub fn maybe_write_json(
+        &mut self,
+        maybe_path: Option<impl AsRef<Path>>,
+    ) -> Result<()> {
+        if let Some(ref path) = maybe_path {
             std::fs::write(path, self.to_json())?;
         };
+        // stats is too large so we write into parquet
+        if let Some(path) = maybe_path {
+            // same filename but parquet extension
+            let stats = self.cache_stats.take();
+            if let Some(stats) = stats {
+                let path = path.as_ref().with_extension("parquet");
+                let mut writer = File::create(path)?;
+
+                let stats_batch = stats.into_record_batch();
+                let schema = stats_batch.schema();
+                let mut writer = parquet::arrow::arrow_writer::ArrowWriter::try_new(
+                    &mut writer,
+                    schema,
+                    None,
+                )?;
+                writer.write(&stats_batch)?;
+                writer.close()?;
+            }
+        }
         Ok(())
     }
 }

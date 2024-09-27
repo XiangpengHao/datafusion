@@ -31,6 +31,7 @@ use datafusion::{
 use datafusion_common::exec_datafusion_err;
 use datafusion_common::instant::Instant;
 use object_store::aws::AmazonS3Builder;
+use parquet::arrow::builder::ArrowArrayCache;
 use structopt::StructOpt;
 use url::Url;
 
@@ -167,16 +168,22 @@ impl RunOpt {
                         pretty::print_batches(&result)?;
                     }
                 }
-
                 let elapsed = start.elapsed();
                 let ms = elapsed.as_secs_f64() * 1000.0;
                 let row_count: usize = result.iter().map(|b| b.num_rows()).sum();
                 println!(
                     "Query {query_id} iteration {i} took {ms:.1} ms and returned {row_count} rows"
                 );
+                if self.common.print_result {
+                    pretty::print_batches(&result)?;
+                }
+
+                // ArrowArrayCache::get().reset();
+
                 benchmark_run.write_iter(elapsed, row_count);
             }
         }
+        benchmark_run.set_cache_stats(ArrowArrayCache::get().stats());
         benchmark_run.maybe_write_json(self.output_path.as_ref())?;
         Ok(())
     }
