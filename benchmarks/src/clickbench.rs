@@ -246,7 +246,10 @@ impl RunOpt {
                         {
                             assert_eq!(result_batch, stored_batch);
                         }
-                        println!("Query {} iteration {} passed", query_id, i);
+                        println!(
+                            "Query {} iteration {} answer check passed",
+                            query_id, i
+                        );
                     }
                 } else {
                     println!("Query {} iteration {} answer not checked", query_id, i);

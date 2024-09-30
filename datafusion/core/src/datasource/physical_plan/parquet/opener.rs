@@ -37,9 +37,11 @@ use datafusion_physical_plan::metrics::ExecutionPlanMetricsSet;
 use futures::{StreamExt, TryStreamExt};
 use log::debug;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
-use parquet::arrow::async_reader::AsyncFileReader;
+use parquet::arrow::async_reader::{AsyncFileReader, CachedSelection};
 use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
 use std::sync::Arc;
+
+use super::cache_filter::CacheFilter;
 
 /// Implements [`FileOpener`] for a parquet file
 pub(super) struct ParquetOpener {
@@ -237,6 +239,9 @@ impl FileOpener for ParquetOpener {
                     );
                 }
             }
+            let cache_filter = CacheFilter::new(&adapted_projections);
+            let (access_plan, cached_selection) = cache_filter
+                .prune_plan_with_cached_batches(access_plan, file_metadata.as_ref());
 
             let row_group_indexes = access_plan.row_group_indexes();
             if let Some(row_selection) =
@@ -249,11 +254,16 @@ impl FileOpener for ParquetOpener {
                 builder = builder.with_limit(limit)
             }
 
-            let stream = builder
+            let mut stream = builder
                 .with_projection(mask)
                 .with_batch_size(batch_size)
                 .with_row_groups(row_group_indexes)
                 .build()?;
+            if !cached_selection.is_empty() {
+                let selection =
+                    CachedSelection::new(cached_selection, adapted_projections);
+                stream.set_cached_selection(selection);
+            }
 
             let adapted = stream
                 .map_err(|e| ArrowError::ExternalError(Box::new(e)))
