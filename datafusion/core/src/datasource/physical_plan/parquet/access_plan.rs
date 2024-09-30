@@ -149,6 +149,11 @@ impl ParquetAccessPlan {
         self.row_groups[idx].should_scan()
     }
 
+    /// Get the access plan for the i-th row group
+    pub fn row_group_access(&self, idx: usize) -> &RowGroupAccess {
+        &self.row_groups[idx]
+    }
+
     /// Set to scan only the [`RowSelection`] in the specified row group.
     ///
     /// Behavior is different depending on the existing access
