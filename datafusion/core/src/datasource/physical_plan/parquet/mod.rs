@@ -46,6 +46,7 @@ use itertools::Itertools;
 use log::debug;
 
 mod access_plan;
+mod cache_filter;
 mod metrics;
 mod opener;
 mod page_filter;
@@ -62,8 +63,8 @@ pub use access_plan::{ParquetAccessPlan, RowGroupAccess};
 pub use metrics::ParquetFileMetrics;
 use opener::ParquetOpener;
 pub use reader::{DefaultParquetFileReaderFactory, ParquetFileReaderFactory};
-pub use row_filter::can_expr_be_pushed_down_with_schemas;
 pub use reader7::{Parquet7FileReader, Parquet7FileReaderFactory};
+pub use row_filter::can_expr_be_pushed_down_with_schemas;
 pub use writer::plan_to_parquet;
 
 /// Execution plan for reading one or more Parquet files.
