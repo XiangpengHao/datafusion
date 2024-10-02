@@ -184,6 +184,23 @@ impl Cache37 {
     pub fn bytes_cache() -> &'static RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>> {
         &CACHE.bytes_map
     }
+
+    pub fn memory_usage() -> usize {
+        let cache = &CACHE;
+        let metadata_map = cache.metadata_map.read().unwrap();
+        let mut total_size = 0;
+
+        for i in metadata_map.iter() {
+            total_size += i.1.memory_size();
+        }
+
+        let bytes_map = cache.bytes_map.read().unwrap();
+        for i in bytes_map.iter() {
+            total_size += i.1.len();
+        }
+
+        total_size
+    }
 }
 
 #[cfg(test)]

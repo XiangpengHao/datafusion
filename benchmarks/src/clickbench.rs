@@ -23,8 +23,12 @@ use std::sync::Arc;
 
 use arrow::ipc::reader::FileReader;
 use arrow::util::pretty;
+use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
+use datafusion::execution::cache::cache_unit::Cache37;
+use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::physical_plan::collect;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
+use datafusion::prelude::ParquetReadOptions;
 use datafusion::{
     error::{DataFusionError, Result},
     prelude::SessionContext,
@@ -32,6 +36,7 @@ use datafusion::{
 use datafusion_common::exec_datafusion_err;
 use datafusion_common::instant::Instant;
 use object_store::aws::AmazonS3Builder;
+use object_store::ObjectStore;
 use parquet::arrow::builder::ArrowArrayCache;
 use structopt::StructOpt;
 use url::Url;
@@ -89,6 +94,10 @@ pub struct RunOpt {
     /// Check the answers against the stored answers
     #[structopt(long)]
     skip_answers: bool,
+
+    /// Generate a flamegraph
+    #[structopt(parse(from_os_str), long)]
+    flamegraph: Option<PathBuf>,
 }
 
 struct AllQueries {
@@ -140,6 +149,7 @@ impl AllQueries {
         self.queries.len() - 1
     }
 }
+
 impl RunOpt {
     pub async fn run(self) -> Result<()> {
         println!("Running benchmarks with the following options: {self:?}");
@@ -168,8 +178,18 @@ impl RunOpt {
             println!("Q{query_id}: {sql}");
 
             for i in 0..iterations {
+                let profiler_guard = if self.flamegraph.is_some() && i == iterations - 1 {
+                    Some(
+                        pprof::ProfilerGuardBuilder::default()
+                            .frequency(1000)
+                            .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+                            .build()
+                            .unwrap(),
+                    )
+                } else {
+                    None
+                };
                 let start = Instant::now();
-                // let results = ctx.sql(sql).await?.collect().await?;
                 let plan = ctx.sql(sql).await?;
                 let (state, plan) = plan.into_parts();
 
@@ -252,28 +272,50 @@ impl RunOpt {
                     println!("Query {} iteration {} answer not checked", query_id, i);
                 }
 
+                if let Some(guard) = profiler_guard {
+                    let flamegraph_path = self.flamegraph.as_ref().unwrap();
+                    if let Ok(report) = guard.report().build() {
+                        let file = File::create(flamegraph_path).unwrap();
+                        report.flamegraph(file).unwrap();
+                    }
+                }
+
                 benchmark_run.write_iter(elapsed, row_count);
             }
         }
+
         benchmark_run.set_cache_stats(ArrowArrayCache::get().stats());
+        benchmark_run.set_parquet_cache_size(Cache37::memory_usage());
         benchmark_run.maybe_write_json(self.output_path.as_ref())?;
         Ok(())
     }
 
     /// Registrs the `hits.parquet` as a table named `hits`
     async fn register_hits(&self, ctx: &SessionContext) -> Result<()> {
-        let options = Default::default();
         let path = self.path.as_os_str().to_str().unwrap();
-        let url = Url::parse(&"minio://parquet-oo").unwrap();
-        let object_store = AmazonS3Builder::new()
-            .with_bucket_name("parquet-oo")
-            .with_endpoint("http://c220g5-110910.wisc.cloudlab.us:9000")
-            .with_allow_http(true)
-            .with_region("us-east-1")
-            .with_access_key_id(env::var("MINIO_ACCESS_KEY_ID").unwrap())
-            .with_secret_access_key(env::var("MINIO_SECRET_ACCESS_KEY").unwrap())
-            .build()?;
-        ctx.register_object_store(&url, Arc::new(object_store));
+
+        let object_store: Arc<dyn ObjectStore> = if path.starts_with("minio://") {
+            let url = Url::parse(path).unwrap();
+            let bucket_name = url.host_str().unwrap_or("parquet-oo");
+            let object_store = AmazonS3Builder::new()
+                .with_bucket_name(bucket_name)
+                .with_endpoint("http://c220g5-110910.wisc.cloudlab.us:9000")
+                .with_allow_http(true)
+                .with_region("us-east-1")
+                .with_access_key_id(env::var("MINIO_ACCESS_KEY_ID").unwrap())
+                .with_secret_access_key(env::var("MINIO_SECRET_ACCESS_KEY").unwrap())
+                .build()?;
+            let object_store = Arc::new(object_store);
+            ctx.register_object_store(&url, object_store.clone());
+            object_store
+        } else {
+            let url = ObjectStoreUrl::local_filesystem();
+            let object_store = ctx.runtime_env().object_store(url).unwrap();
+            Arc::new(object_store)
+        };
+
+        let mut options: ParquetReadOptions<'_> = Default::default();
+        options.reader = Some(Arc::new(Parquet7FileReaderFactory::new(object_store)));
 
         ctx.register_parquet("hits", &path, options)
             .await
