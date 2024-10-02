@@ -74,8 +74,7 @@ use parquet::arrow::arrow_writer::{
 use parquet::arrow::{
     arrow_to_parquet_schema, parquet_to_arrow_schema, AsyncArrowWriter,
 };
-use parquet::file::footer::{decode_footer, decode_metadata};
-use parquet::file::metadata::{ParquetMetaData, RowGroupMetaData};
+use parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader, RowGroupMetaData};
 use parquet::file::properties::WriterProperties;
 use parquet::file::writer::SerializedFileWriter;
 use parquet::format::FileMetaData;
@@ -487,7 +486,7 @@ pub async fn fetch_parquet_metadata(
     let mut footer = [0; 8];
     footer.copy_from_slice(&suffix[suffix_len - 8..suffix_len]);
 
-    let length = decode_footer(&footer)?;
+    let length = ParquetMetaDataReader::decode_footer(&footer)?;
 
     if meta.size < length + 8 {
         return exec_err!(
@@ -509,11 +508,11 @@ pub async fn fetch_parquet_metadata(
         metadata.put(remaining_metadata.as_ref());
         metadata.put(&suffix[..suffix_len - 8]);
 
-        Ok(decode_metadata(metadata.as_ref())?)
+        Ok(ParquetMetaDataReader::decode_metadata(metadata.as_ref())?)
     } else {
         let metadata_start = meta.size - length - 8;
 
-        Ok(decode_metadata(
+        Ok(ParquetMetaDataReader::decode_metadata(
             &suffix[metadata_start - footer_start..suffix_len - 8],
         )?)
     }
@@ -571,7 +570,7 @@ async fn fetch_statistics(
     }
 
     let metadata = fetch_parquet_metadata(store, file, metadata_size_hint).await?;
-    
+
     {
         let mut cache = Cache37::meta_cache().write().unwrap();
         cache.insert(path.clone(), Arc::new(metadata.clone()));
