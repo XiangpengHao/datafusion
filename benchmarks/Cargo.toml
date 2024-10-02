@@ -52,6 +52,7 @@ structopt = { version = "0.3", default-features = false }
 test-utils = { path = "../test-utils/", version = "0.1.0" }
 tokio = { workspace = true, features = ["rt-multi-thread", "parking_lot"] }
 url.workspace = true
+pprof = { version = "0.13", features = ["flamegraph"] }
 
 [dev-dependencies]
 datafusion-proto = { workspace = true }
