@@ -25,6 +25,7 @@ use crate::datasource::file_format::file_compression_type::FileCompressionType;
 use crate::datasource::file_format::parquet::ParquetFormat;
 use crate::datasource::file_format::DEFAULT_SCHEMA_INFER_MAX_RECORD;
 use crate::datasource::listing::ListingTableUrl;
+use crate::datasource::physical_plan::ParquetFileReaderFactory;
 use crate::datasource::{
     file_format::{avro::AvroFormat, csv::CsvFormat, json::JsonFormat},
     listing::ListingOptions,
@@ -241,6 +242,9 @@ pub struct ParquetReadOptions<'a> {
     pub schema: Option<&'a Schema>,
     /// Indicates how the file is sorted
     pub file_sort_order: Vec<Vec<SortExpr>>,
+
+    /// A custom ParquetFileReaderFactory to use for reading Parquet files.
+    pub reader: Option<Arc<dyn ParquetFileReaderFactory>>,
 }
 
 impl Default for ParquetReadOptions<'_> {
@@ -252,6 +256,7 @@ impl Default for ParquetReadOptions<'_> {
             skip_metadata: None,
             schema: None,
             file_sort_order: vec![],
+            reader: None,
         }
     }
 }
@@ -563,6 +568,10 @@ impl ReadOptions<'_> for ParquetReadOptions<'_> {
         table_options: TableOptions,
     ) -> ListingOptions {
         let mut file_format = ParquetFormat::new().with_options(table_options.parquet);
+
+        if let Some(reader) = &self.reader {
+            file_format = file_format.with_reader(reader.clone());
+        }
 
         if let Some(parquet_pruning) = self.parquet_pruning {
             file_format = file_format.with_enable_pruning(parquet_pruning)

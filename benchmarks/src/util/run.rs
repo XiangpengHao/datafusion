@@ -17,7 +17,7 @@
 
 use datafusion::{error::Result, DATAFUSION_VERSION};
 use datafusion_common::utils::get_available_parallelism;
-use parquet::arrow::builder::CacheStatistics;
+use parquet::arrow::builder::ArrowCacheStatistics;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use std::{
@@ -99,7 +99,8 @@ pub struct BenchmarkRun {
     context: RunContext,
     queries: Vec<BenchQuery>,
     current_case: Option<usize>,
-    cache_stats: Option<CacheStatistics>,
+    arrow_cache_stats: Option<ArrowCacheStatistics>,
+    parquet_cache_size: Option<usize>,
 }
 
 impl Default for BenchmarkRun {
@@ -115,7 +116,8 @@ impl BenchmarkRun {
             context: RunContext::new(),
             queries: vec![],
             current_case: None,
-            cache_stats: None,
+            arrow_cache_stats: None,
+            parquet_cache_size: None,
         }
     }
     /// begin a new case. iterations added after this will be included in the new case
@@ -142,8 +144,12 @@ impl BenchmarkRun {
         }
     }
 
-    pub fn set_cache_stats(&mut self, cache_stats: CacheStatistics) {
-        self.cache_stats = Some(cache_stats);
+    pub fn set_cache_stats(&mut self, cache_stats: ArrowCacheStatistics) {
+        self.arrow_cache_stats = Some(cache_stats);
+    }
+
+    pub fn set_parquet_cache_size(&mut self, size: usize) {
+        self.parquet_cache_size = Some(size);
     }
 
     /// Stringify data into formatted json
@@ -151,6 +157,21 @@ impl BenchmarkRun {
         let mut output = HashMap::<&str, Value>::new();
         output.insert("context", serde_json::to_value(&self.context).unwrap());
         output.insert("queries", serde_json::to_value(&self.queries).unwrap());
+        output.insert(
+            "parquet_cache_size",
+            serde_json::to_value(&self.parquet_cache_size.unwrap_or(0)).unwrap(),
+        );
+        output.insert(
+            "arrow_cache_size",
+            serde_json::to_value(
+                &self
+                    .arrow_cache_stats
+                    .as_ref()
+                    .map(|x| x.memory_usage())
+                    .unwrap_or(0),
+            )
+            .unwrap(),
+        );
         serde_json::to_string_pretty(&output).unwrap()
     }
 
@@ -165,7 +186,7 @@ impl BenchmarkRun {
         // stats is too large so we write into parquet
         if let Some(path) = maybe_path {
             // same filename but parquet extension
-            let stats = self.cache_stats.take();
+            let stats = self.arrow_cache_stats.take();
             if let Some(stats) = stats {
                 let path = path.as_ref().with_extension("parquet");
                 let mut writer = File::create(path)?;
