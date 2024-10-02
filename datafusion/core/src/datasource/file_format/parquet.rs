@@ -579,7 +579,7 @@ async fn fetch_statistics(
     }
 
     let metadata = fetch_parquet_metadata(store, file, metadata_size_hint).await?;
-    
+
     {
         let mut cache = Cache37::meta_cache().write().unwrap();
         cache.insert(path.clone(), Arc::new(metadata.clone()));
