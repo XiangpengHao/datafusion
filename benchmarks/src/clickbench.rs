@@ -99,6 +99,10 @@ pub struct RunOpt {
     /// Generate a flamegraph
     #[structopt(parse(from_os_str), long)]
     flamegraph: Option<PathBuf>,
+
+    /// Predicate pushdown
+    #[structopt(long)]
+    pushdown_filters: bool,
 }
 
 struct AllQueries {
@@ -168,6 +172,12 @@ impl RunOpt {
             // as binary due to how it was written. Force it to strings
             parquet_options.binary_as_string = true;
         }
+        config
+            .options_mut()
+            .execution
+            .parquet
+            .schema_force_view_types = self.common.force_view_types;
+        config.options_mut().execution.parquet.pushdown_filters = self.pushdown_filters;
 
         let ctx = SessionContext::new_with_config(config);
         self.register_hits(&ctx).await?;
