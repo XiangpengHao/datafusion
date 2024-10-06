@@ -46,7 +46,6 @@ use itertools::Itertools;
 use log::debug;
 
 mod access_plan;
-mod cache_filter;
 mod metrics;
 mod opener;
 mod page_filter;
