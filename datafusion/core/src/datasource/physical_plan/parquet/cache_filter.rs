@@ -1,14 +1,8 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Range,
-};
+use std::collections::HashMap;
 
 use itertools::Itertools;
 use parquet::{
-    arrow::{
-        arrow_reader::{RowSelection, RowSelector},
-        builder::ArrowArrayCache,
-    },
+    arrow::{arrow_reader::RowSelection, builder::ArrowArrayCache},
     file::metadata::ParquetMetaData,
 };
 
@@ -42,6 +36,7 @@ impl<'a> CacheFilter<'a> {
 
         let mut cached_selection = HashMap::new();
         let row_group_indexes = plan.row_group_indexes();
+        let cache = ArrowArrayCache::get();
         for row_group_index in row_group_indexes {
             let current_access = plan.row_group_access(row_group_index);
             if matches!(current_access, RowGroupAccess::Skip) {
@@ -49,71 +44,39 @@ impl<'a> CacheFilter<'a> {
             }
 
             let row_group_meta = groups.get(row_group_index).unwrap();
-            let mut intersected_ranges: Option<HashSet<Range<usize>>> = None;
 
-            for column_idx in self.column_idx.iter() {
-                let cache = ArrowArrayCache::get();
-                if let Some(cached_ranges) =
-                    cache.get_cached_ranges(row_group_index, *column_idx)
-                {
-                    intersected_ranges = match intersected_ranges {
-                        None => Some(cached_ranges),
-                        Some(existing_ranges) => {
-                            Some(intersect_ranges(existing_ranges, &cached_ranges))
-                        }
-                    };
-                } else {
-                    intersected_ranges = None;
-                    break;
-                }
-            }
-            let Some(selection) = intersected_ranges else {
+            let Some(intersected_ranges) =
+                cache.get_cached_ranges_of_columns(row_group_index, &self.column_idx)
+            else {
                 continue;
             };
-
-            let sorted_ranges = selection
+            let sorted_ranges = intersected_ranges
                 .into_iter()
                 .sorted_by_key(|range| range.start)
                 .collect_vec();
 
-            let mut selection = Vec::new();
-            let starting_row = sorted_ranges.first().unwrap().start;
-            let ending_row = sorted_ranges.last().unwrap().end;
-            let row_count = row_group_meta.num_rows() as usize;
-            if starting_row > 0 {
-                selection.push(RowSelector::select(starting_row));
-            }
-            let mut prev_end = starting_row;
-            let mut cached_row_ids = Vec::new();
+            let selection_from_cache = RowSelection::from_consecutive_ranges(
+                sorted_ranges.iter().map(|r| r.clone()),
+                row_group_meta.num_rows() as usize,
+            )
+            .into_inverted();
 
-            for range in sorted_ranges {
-                if range.start > prev_end {
-                    // Fill the gap with a select
-                    selection.push(RowSelector::select(range.start - prev_end));
-                }
-                selection.push(RowSelector::skip(range.end - range.start));
-                cached_row_ids.push(range.start);
-                prev_end = range.end;
-            }
-            if ending_row < row_count {
-                selection.push(RowSelector::select(row_count - ending_row));
-            }
+            let cached_row_ids = sorted_ranges.iter().map(|r| r.start).collect_vec();
 
-            let selection = RowSelection::from(selection);
             let old = cached_selection.insert(row_group_index, cached_row_ids);
             assert!(old.is_none());
 
             let current_access = plan.row_group_access(row_group_index);
             match current_access {
                 RowGroupAccess::Scan => {
-                    if !selection.selects_any() {
+                    if !selection_from_cache.selects_any() {
                         plan.skip(row_group_index);
                     } else {
-                        plan.scan_selection(row_group_index, selection);
+                        plan.scan_selection(row_group_index, selection_from_cache);
                     }
                 }
                 RowGroupAccess::Selection(_s) => {
-                    plan.scan_selection(row_group_index, selection);
+                    plan.scan_selection(row_group_index, selection_from_cache);
                 }
                 RowGroupAccess::Skip => {
                     unreachable!()
@@ -123,35 +86,4 @@ impl<'a> CacheFilter<'a> {
 
         (plan, cached_selection)
     }
-}
-
-/// Returns the ranges that are present in both `base` and `input`.
-/// Ranges in both sets are assumed to be non-overlapping.
-///
-/// The returned ranges are exactly those that appear in both input sets,
-/// preserving their original bounds for use in cache retrieval.
-///
-/// # Examples
-///
-/// ```
-/// use std::collections::HashSet;
-/// use std::ops::Range;
-///
-/// let base: HashSet<Range<usize>> = vec![0..10, 20..30, 40..45].into_iter().collect();
-/// let input: HashSet<Range<usize>> = vec![0..10, 25..35, 40..45].into_iter().collect();
-/// let result = intersect_ranges(base, input);
-/// assert_eq!(result, vec![0..10, 40..45].into_iter().collect::<HashSet<_>>());
-/// ```
-fn intersect_ranges(
-    mut base: HashSet<Range<usize>>,
-    input: &HashSet<Range<usize>>,
-) -> HashSet<Range<usize>> {
-    for range in input {
-        if base.contains(range) {
-            continue;
-        } else {
-            base.remove(range);
-        }
-    }
-    base
 }
