@@ -7,7 +7,7 @@ log_file="output_queries.log"
 for i in {0..42}
 do
     # Define the command
-    command="cargo run --profile release-nonlto --bin dfbench -- clickbench --queries-path benchmarks/queries/clickbench/queries.sql --iterations 4 --path benchmarks/data/hits.parquet --query $i"
+    command="cargo run --profile release-nonlto --bin dfbench -- clickbench --queries-path benchmarks/queries/clickbench/queries.sql --iterations 4 --path benchmarks/data/hits.parquet --query $i --pushdown-filters"
     
     # Run the command and capture the output to the log file
     echo "Running query $i..." | tee -a $log_file
