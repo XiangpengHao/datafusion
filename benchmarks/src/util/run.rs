@@ -16,7 +16,7 @@
 // under the License.
 
 use datafusion::{error::Result, DATAFUSION_VERSION};
-use parquet::arrow::builder::ArrowCacheStatistics;
+use parquet::arrow::arrow_cache::ArrowCacheStatistics;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use std::{
