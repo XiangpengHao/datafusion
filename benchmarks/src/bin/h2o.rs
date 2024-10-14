@@ -24,6 +24,7 @@ use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
 use datafusion::datasource::MemTable;
+use datafusion::execution::cache::cache_unit::Cache37;
 use datafusion::prelude::CsvReadOptions;
 use datafusion::{arrow::util::pretty, error::Result, prelude::SessionContext};
 use datafusion_benchmarks::util::BenchmarkRun;
@@ -124,7 +125,7 @@ async fn group_by(opt: &GroupBy) -> Result<()> {
     if opt.debug {
         pretty::print_batches(&batches)?;
     }
-    rundata.write_iter(elapsed, numrows);
+    rundata.write_iter(elapsed, numrows, Cache37::consume_bytes_read());
     println!(
         "h2o groupby query {} took {} ms",
         opt.query,

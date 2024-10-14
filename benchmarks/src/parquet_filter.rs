@@ -21,6 +21,7 @@ use crate::util::{AccessLogOpt, BenchmarkRun, CommonOpt};
 
 use arrow::util::pretty;
 use datafusion::common::Result;
+use datafusion::execution::cache::cache_unit::Cache37;
 use datafusion::logical_expr::utils::disjunction;
 use datafusion::logical_expr::{lit, or, Expr};
 use datafusion::physical_plan::collect;
@@ -157,7 +158,7 @@ impl RunOpt {
                     .await?;
                     let ms = elapsed.as_secs_f64() * 1000.0;
                     println!("Iteration {i} returned {rows} rows in {ms} ms");
-                    rundata.write_iter(elapsed, rows);
+                    rundata.write_iter(elapsed, rows, Cache37::consume_bytes_read());
                 }
             }
             println!("\n");

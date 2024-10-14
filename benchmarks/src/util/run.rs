@@ -84,6 +84,7 @@ struct QueryIter {
     #[serde(serialize_with = "serialize_elapsed")]
     elapsed: Duration,
     row_count: usize,
+    parquet_cache_bytes_read: usize,
 }
 /// A single benchmark case
 #[derive(Debug, Serialize)]
@@ -101,6 +102,7 @@ pub struct BenchmarkRun {
     current_case: Option<usize>,
     arrow_cache_stats: Option<ArrowCacheStatistics>,
     parquet_cache_size: Option<usize>,
+    parquet_cache_read_bytes: Option<usize>,
 }
 
 impl Default for BenchmarkRun {
@@ -118,6 +120,7 @@ impl BenchmarkRun {
             current_case: None,
             arrow_cache_stats: None,
             parquet_cache_size: None,
+            parquet_cache_read_bytes: None,
         }
     }
     /// begin a new case. iterations added after this will be included in the new case
@@ -134,22 +137,29 @@ impl BenchmarkRun {
         }
     }
     /// Write a new iteration to the current case
-    pub fn write_iter(&mut self, elapsed: Duration, row_count: usize) {
+    pub fn write_iter(
+        &mut self,
+        elapsed: Duration,
+        row_count: usize,
+        parquet_cache_bytes_read: usize,
+    ) {
         if let Some(idx) = self.current_case {
-            self.queries[idx]
-                .iterations
-                .push(QueryIter { elapsed, row_count })
+            self.queries[idx].iterations.push(QueryIter {
+                elapsed,
+                row_count,
+                parquet_cache_bytes_read,
+            })
         } else {
             panic!("no cases existed yet");
         }
     }
 
-    pub fn set_cache_stats(&mut self, cache_stats: ArrowCacheStatistics) {
+    pub fn set_arrow_cache_stats(&mut self, cache_stats: ArrowCacheStatistics) {
         self.arrow_cache_stats = Some(cache_stats);
     }
 
-    pub fn set_parquet_cache_size(&mut self, size: usize) {
-        self.parquet_cache_size = Some(size);
+    pub fn set_parquet_cache_stats(&mut self, parquet_cache_size: usize) {
+        self.parquet_cache_size = Some(parquet_cache_size);
     }
 
     /// Stringify data into formatted json
@@ -160,6 +170,10 @@ impl BenchmarkRun {
         output.insert(
             "parquet_cache_size",
             serde_json::to_value(&self.parquet_cache_size.unwrap_or(0)).unwrap(),
+        );
+        output.insert(
+            "parquet_cache_read_bytes",
+            serde_json::to_value(&self.parquet_cache_read_bytes.unwrap_or(0)).unwrap(),
         );
         output.insert(
             "arrow_cache_size",

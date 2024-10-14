@@ -23,6 +23,8 @@ use crate::util::{AccessLogOpt, BenchmarkRun, CommonOpt};
 use arrow::util::pretty;
 use datafusion::common::Result;
 use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
+use datafusion::execution::cache::cache_unit::Cache37;
+use datafusion::physical_expr::PhysicalSortExpr;
 use datafusion::physical_plan::collect;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::prelude::{SessionConfig, SessionContext};
@@ -156,7 +158,7 @@ impl RunOpt {
                     exec_sort(&ctx, &expr, &test_file, self.common.debug).await?;
                 let ms = elapsed.as_secs_f64() * 1000.0;
                 println!("Iteration {i} finished in {ms} ms");
-                rundata.write_iter(elapsed, rows);
+                rundata.write_iter(elapsed, rows, Cache37::consume_bytes_read());
             }
             println!("\n");
         }

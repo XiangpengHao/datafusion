@@ -293,12 +293,16 @@ impl RunOpt {
                     }
                 }
 
-                benchmark_run.write_iter(elapsed, row_count);
+                benchmark_run.write_iter(
+                    elapsed,
+                    row_count,
+                    Cache37::consume_bytes_read(),
+                );
             }
         }
 
-        benchmark_run.set_cache_stats(ArrowArrayCache::get().stats());
-        benchmark_run.set_parquet_cache_size(Cache37::memory_usage());
+        benchmark_run.set_arrow_cache_stats(ArrowArrayCache::get().stats());
+        benchmark_run.set_parquet_cache_stats(Cache37::memory_usage());
         benchmark_run.maybe_write_json(self.output_path.as_ref())?;
         Ok(())
     }

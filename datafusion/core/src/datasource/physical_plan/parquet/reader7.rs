@@ -68,7 +68,7 @@ impl AsyncFileReader for Parquet7FileReader {
         let total = ranges.iter().map(|r| r.end - r.start).sum();
         self.file_metrics.bytes_scanned.add(total);
 
-        let cache = Cache37::bytes_cache().read().unwrap();
+        let cache = Cache37::bytes_cache();
         let path = self.inner.meta.location.clone();
 
         let mut cached_bytes = Vec::new();
@@ -85,8 +85,6 @@ impl AsyncFileReader for Parquet7FileReader {
             }
         }
 
-        drop(cache); // Release the read lock
-
         if missing_ranges.is_empty() {
             cached_bytes.sort_by_key(|&(i, _)| i);
             let result = cached_bytes
@@ -99,14 +97,12 @@ impl AsyncFileReader for Parquet7FileReader {
         let get_bytes = self.inner.get_byte_ranges(missing_ranges);
         async move {
             let bytes = get_bytes.await?;
-            let mut cache = Cache37::bytes_cache().write().unwrap();
+            let cache = Cache37::bytes_cache();
 
             for (i, byte) in missing_indices.iter().zip(bytes.iter()) {
                 let key = (path.clone(), ranges[*i].clone());
-                cache.entry(key).or_insert_with(|| Arc::new(byte.clone()));
+                cache.put(key, Arc::new(byte.clone()));
             }
-
-            drop(cache); // Release the write lock
 
             let mut result = vec![Bytes::new(); ranges.len()];
             for (i, bytes) in cached_bytes {
@@ -126,7 +122,7 @@ impl AsyncFileReader for Parquet7FileReader {
     ) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         self.file_metrics.bytes_scanned.add(range.end - range.start);
 
-        let cache = Cache37::bytes_cache().read().unwrap();
+        let cache = Cache37::bytes_cache();
         let path = self.inner.meta.location.clone();
         let key = (path.clone(), range.clone());
 
@@ -135,14 +131,12 @@ impl AsyncFileReader for Parquet7FileReader {
             return async move { Ok((*bytes).clone()) }.boxed();
         }
 
-        drop(cache); // Release the read lock
-
         let get_bytes = self.inner.get_bytes(range.clone());
         async move {
             let bytes = get_bytes.await?;
             let bytes = Arc::new(bytes);
-            let mut cache = Cache37::bytes_cache().write().unwrap();
-            cache.entry(key).or_insert(bytes.clone());
+            let cache = Cache37::bytes_cache();
+            cache.put(key, bytes.clone());
             Ok((*bytes).clone())
         }
         .boxed()

@@ -22,6 +22,7 @@ use crate::{AccessLogOpt, BenchmarkRun, CommonOpt};
 use arrow::util::pretty;
 use datafusion::common::Result;
 use datafusion::config::ConfigOptions;
+use datafusion::execution::cache::cache_unit::Cache37;
 use datafusion::logical_expr::{lit, Expr};
 use datafusion::physical_plan::collect;
 use datafusion::prelude::{col, SessionConfig, SessionContext};
@@ -134,7 +135,10 @@ impl RunOpt {
 
         let filter_matrix = vec![
             // ("Selective-ish filter", col("request_method").eq(lit("GET"))),
-            ("Filter everything", col("response_status").lt_eq(lit(500_u16))),
+            (
+                "Filter everything",
+                col("response_status").lt_eq(lit(500_u16)),
+            ),
         ];
 
         for (name, filter_expr) in &filter_matrix {
@@ -158,7 +162,7 @@ impl RunOpt {
                     .await?;
                     let ms = elapsed.as_secs_f64() * 1000.0;
                     println!("Iteration {i} returned {rows} rows in {ms} ms");
-                    rundata.write_iter(elapsed, rows);
+                    rundata.write_iter(elapsed, rows, Cache37::consume_bytes_read());
                 }
             }
             println!("\n");
