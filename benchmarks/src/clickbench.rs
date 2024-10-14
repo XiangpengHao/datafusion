@@ -38,7 +38,7 @@ use datafusion_common::exec_datafusion_err;
 use datafusion_common::instant::Instant;
 use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
-use parquet::arrow::builder::ArrowArrayCache;
+use parquet::arrow::arrow_cache::ArrowArrayCache;
 use structopt::StructOpt;
 use url::Url;
 
