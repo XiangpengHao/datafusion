@@ -532,10 +532,10 @@ async fn fetch_schema(
         file_metadata.key_value_metadata(),
     )?;
 
-    {
-        let mut cache = Cache37::meta_cache().write().unwrap();
-        cache.insert(path.clone(), Arc::new(metadata));
-    }
+    // {
+    //     let mut cache = Cache37::meta_cache().write().unwrap();
+    //     cache.insert(path.clone(), Arc::new(metadata));
+    // }
 
     Ok(schema)
 }

@@ -16,6 +16,7 @@
 // under the License.
 
 use std::ops::Range;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 
 use crate::cache::CacheAccessor;
@@ -166,14 +167,48 @@ use parquet::file::metadata::ParquetMetaData;
 
 pub struct Cache37 {
     metadata_map: RwLock<HashMap<Path, Arc<ParquetMetaData>>>,
-    bytes_map: RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>>,
+    bytes_cache: BytesCache,
+}
+
+pub struct BytesCache {
+    map: RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>>,
+    bytes_read: AtomicUsize,
+}
+
+impl BytesCache {
+    fn new() -> Self {
+        Self {
+            map: RwLock::new(HashMap::new()),
+            bytes_read: AtomicUsize::new(0),
+        }
+    }
+
+    fn memory_usage(&self) -> usize {
+        let map = self.map.read().unwrap();
+        map.iter().map(|(_, v)| v.len()).sum()
+    }
+
+    pub fn get(&self, k: &(Path, Range<usize>)) -> Option<Arc<Bytes>> {
+        let map = self.map.read().unwrap();
+        match map.get(k) {
+            Some(v) => {
+                self.bytes_read.fetch_add(v.len(), Ordering::Relaxed);
+                Some(Arc::clone(v))
+            }
+            None => None,
+        }
+    }
+
+    pub fn put(&self, k: (Path, Range<usize>), v: Arc<Bytes>) {
+        self.map.write().unwrap().insert(k, v);
+    }
 }
 
 impl Cache37 {
     fn new() -> Self {
         Self {
             metadata_map: RwLock::new(HashMap::new()),
-            bytes_map: RwLock::new(HashMap::new()),
+            bytes_cache: BytesCache::new(),
         }
     }
 
@@ -181,8 +216,8 @@ impl Cache37 {
         &CACHE.metadata_map
     }
 
-    pub fn bytes_cache() -> &'static RwLock<HashMap<(Path, Range<usize>), Arc<Bytes>>> {
-        &CACHE.bytes_map
+    pub fn bytes_cache() -> &'static BytesCache {
+        &CACHE.bytes_cache
     }
 
     pub fn memory_usage() -> usize {
@@ -194,12 +229,13 @@ impl Cache37 {
             total_size += i.1.memory_size();
         }
 
-        let bytes_map = cache.bytes_map.read().unwrap();
-        for i in bytes_map.iter() {
-            total_size += i.1.len();
-        }
+        total_size += cache.bytes_cache.memory_usage();
 
         total_size
+    }
+
+    pub fn consume_bytes_read() -> usize {
+        CACHE.bytes_cache.bytes_read.swap(0, Ordering::Relaxed)
     }
 }
 
