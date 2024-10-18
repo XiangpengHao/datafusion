@@ -31,6 +31,7 @@ use datafusion::datasource::listing::{
 };
 use datafusion::datasource::{MemTable, TableProvider};
 use datafusion::error::Result;
+use datafusion::execution::cache::cache_unit::Cache37;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
 use datafusion::physical_plan::{collect, displayable};
 use datafusion::prelude::*;
@@ -293,7 +294,11 @@ impl RunOpt {
             benchmark_run.start_new_case(&format!("Query {query_id}"));
             let query_run = self.benchmark_query(query_id).await?;
             for iter in query_run {
-                benchmark_run.write_iter(iter.elapsed, iter.row_count);
+                benchmark_run.write_iter(
+                    iter.elapsed,
+                    iter.row_count,
+                    Cache37::consume_bytes_read(),
+                );
             }
         }
         benchmark_run.maybe_write_json(self.output_path.as_ref())?;
