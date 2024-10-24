@@ -63,13 +63,17 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use arrow::array::BooleanArray;
+use arrow::array::{AsArray, BooleanArray};
+use arrow::compute::kernels;
 use arrow::datatypes::{DataType, Schema};
 use arrow::error::{ArrowError, Result as ArrowResult};
 use arrow::record_batch::RecordBatch;
+use datafusion_expr::{ColumnarValue, Operator};
+use datafusion_physical_expr_common::datum::apply_cmp;
 use parquet::arrow::arrow_reader::{ArrowPredicate, RowFilter};
 use parquet::arrow::ProjectionMask;
 use parquet::file::metadata::ParquetMetaData;
+use vortex::IntoCanonical;
 
 use crate::datasource::schema_adapter::SchemaMapper;
 use datafusion_common::cast::as_boolean_array;
@@ -77,7 +81,7 @@ use datafusion_common::tree_node::{
     Transformed, TransformedResult, TreeNode, TreeNodeRecursion, TreeNodeRewriter,
 };
 use datafusion_common::{arrow_datafusion_err, DataFusionError, Result, ScalarValue};
-use datafusion_physical_expr::expressions::{Column, Literal};
+use datafusion_physical_expr::expressions::{BinaryExpr, Column, LikeExpr, Literal};
 use datafusion_physical_expr::utils::reassign_predicate_columns;
 use datafusion_physical_expr::{split_conjunction, PhysicalExpr};
 
@@ -112,6 +116,7 @@ pub(crate) struct DatafusionArrowPredicate {
     time: metrics::Time,
     /// used to perform type coercion while filtering rows
     schema_mapping: Arc<dyn SchemaMapper>,
+    schema: Arc<Schema>,
 }
 
 impl DatafusionArrowPredicate {
@@ -147,6 +152,7 @@ impl DatafusionArrowPredicate {
             rows_matched,
             time,
             schema_mapping,
+            schema,
         })
     }
 }
@@ -183,6 +189,107 @@ impl ArrowPredicate for DatafusionArrowPredicate {
                     "Error evaluating filter predicate: {e:?}"
                 ))
             })
+    }
+
+    fn evaluate_any(
+        &mut self,
+        input: &dyn std::any::Any,
+    ) -> Result<BooleanArray, ArrowError> {
+        if let Some(batch) = input.downcast_ref::<RecordBatch>() {
+            return self.evaluate(batch.clone());
+        }
+
+        if let Some(array) = input.downcast_ref::<vortex::Array>() {
+            if let Some(binary_expr) =
+                self.physical_expr.as_any().downcast_ref::<BinaryExpr>()
+            {
+                if let Some(literal) =
+                    binary_expr.right().as_any().downcast_ref::<Literal>()
+                {
+                    let op = binary_expr.op();
+                    if let Ok(v) = vortex_dict::DictArray::try_from(array) {
+                        let arrow_dict = v
+                            .into_arrow_dict::<arrow_array::types::UInt64Type>()
+                            .unwrap();
+                        let lhs = ColumnarValue::Array(Arc::new(arrow_dict));
+                        let rhs = ColumnarValue::Scalar(literal.value().clone());
+
+                        let result = match op {
+                            Operator::NotEq => apply_cmp(&lhs, &rhs, kernels::cmp::neq),
+                            Operator::Eq => apply_cmp(&lhs, &rhs, kernels::cmp::eq),
+                            Operator::Lt => apply_cmp(&lhs, &rhs, kernels::cmp::lt),
+                            Operator::LtEq => apply_cmp(&lhs, &rhs, kernels::cmp::lt_eq),
+                            Operator::Gt => apply_cmp(&lhs, &rhs, kernels::cmp::gt),
+                            Operator::GtEq => apply_cmp(&lhs, &rhs, kernels::cmp::gt_eq),
+                            Operator::LikeMatch => {
+                                apply_cmp(&lhs, &rhs, arrow::compute::like)
+                            }
+                            Operator::ILikeMatch => {
+                                apply_cmp(&lhs, &rhs, arrow::compute::ilike)
+                            }
+                            Operator::NotLikeMatch => {
+                                apply_cmp(&lhs, &rhs, arrow::compute::nlike)
+                            }
+                            Operator::NotILikeMatch => {
+                                apply_cmp(&lhs, &rhs, arrow::compute::nilike)
+                            }
+                            _ => panic!("unsupported operator: {:?}", op),
+                        };
+                        if let Ok(result) = result {
+                            let filtered =
+                                result.into_array(array.len())?.as_boolean().clone();
+                            return Ok(filtered);
+                        }
+                    }
+                }
+            } else if let Some(like_expr) =
+                self.physical_expr.as_any().downcast_ref::<LikeExpr>()
+            {
+                if let Some(literal) =
+                    like_expr.pattern().as_any().downcast_ref::<Literal>()
+                {
+                    if let Ok(v) = vortex_dict::DictArray::try_from(array) {
+                        let arrow_dict = v
+                            .into_arrow_dict::<arrow_array::types::UInt64Type>()
+                            .unwrap();
+                        let lhs = ColumnarValue::Array(Arc::new(arrow_dict));
+                        let rhs = ColumnarValue::Scalar(literal.value().clone());
+
+                        let result =
+                            match (like_expr.negated(), like_expr.case_insensitive()) {
+                                (false, false) => {
+                                    apply_cmp(&lhs, &rhs, arrow::compute::like)
+                                }
+                                (true, false) => {
+                                    apply_cmp(&lhs, &rhs, arrow::compute::nlike)
+                                }
+                                (false, true) => {
+                                    apply_cmp(&lhs, &rhs, arrow::compute::ilike)
+                                }
+                                (true, true) => {
+                                    apply_cmp(&lhs, &rhs, arrow::compute::nilike)
+                                }
+                            };
+                        if let Ok(result) = result {
+                            let filtered =
+                                result.into_array(array.len())?.as_boolean().clone();
+                            return Ok(filtered);
+                        }
+                    }
+                }
+            }
+            let arrow_array = array
+                .clone()
+                .into_canonical()
+                .unwrap()
+                .into_arrow()
+                .unwrap();
+            let record_batch =
+                RecordBatch::try_new(self.schema.clone(), vec![arrow_array]).unwrap();
+            return self.evaluate(record_batch);
+        }
+
+        unimplemented!()
     }
 }
 

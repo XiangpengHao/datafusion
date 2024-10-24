@@ -130,6 +130,9 @@ url = { workspace = true }
 uuid = { version = "1.7", features = ["v4"] }
 xz2 = { version = "0.1", optional = true, features = ["static"] }
 zstd = { version = "0.13", optional = true, default-features = false }
+vortex-array = { path = "../../../vortex/vortex-array" }
+vortex-scalar = { path = "../../../vortex/vortex-scalar" }
+vortex-dict = { path = "../../../vortex/encodings/dict" }
 
 [dev-dependencies]
 arrow-buffer = { workspace = true }

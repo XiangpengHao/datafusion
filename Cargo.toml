@@ -77,21 +77,22 @@ version = "43.0.0"
 ahash = { version = "0.8", default-features = false, features = [
     "runtime-rng",
 ] }
-arrow = { version = "53.3.0", features = [
+arrow = { path = "../arrow-rs/arrow", features = [
     "prettyprint",
 ] }
-arrow-array = { version = "53.3.0", default-features = false, features = [
+arrow-array = { path = "../arrow-rs/arrow-array", default-features = false, features = [
     "chrono-tz",
 ] }
-arrow-buffer = { version = "53.3.0", default-features = false }
-arrow-flight = { version = "53.3.0", features = [
+arrow-buffer = { path = "../arrow-rs/arrow-buffer", default-features = false }
+arrow-flight = { path = "../arrow-rs/arrow-flight", features = [
     "flight-sql-experimental",
 ] }
-arrow-ipc = { version = "53.3.0", default-features = false, features = [
+arrow-ipc = { path = "../arrow-rs/arrow-ipc", default-features = false, features = [
     "lz4",
 ] }
-arrow-ord = { version = "53.3.0", default-features = false }
-arrow-schema = { version = "53.3.0", default-features = false }
+arrow-ord = { path = "../arrow-rs/arrow-ord", default-features = false }
+arrow-schema = { path = "../arrow-rs/arrow-schema", default-features = false }
+arrow-string = { path = "../arrow-rs/arrow-string", default-features = false }
 async-trait = "0.1.73"
 bigdecimal = "0.4.6"
 bytes = "1.4"
@@ -133,7 +134,7 @@ itertools = "0.13"
 log = "^0.4"
 object_store = { version = "0.11.0", default-features = false }
 parking_lot = "0.12"
-parquet = { version = "53.3.0", default-features = false, features = [
+parquet = { path = "../arrow-rs/parquet", default-features = false, features = [
     "arrow",
     "async",
     "object_store",
@@ -160,7 +161,7 @@ lto = true
 # cargo build --profile release-nonlto
 [profile.release-nonlto]
 codegen-units = 16
-debug = 0 
+debug = 0
 debug-assertions = false
 incremental = false
 inherits = "release"
@@ -179,16 +180,3 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tarpaulin)"] }
 unused_qualifications = "deny"
 unused_imports = "deny"
 
-[patch.crates-io]
-arrow = { path = "../arrow-rs/arrow" }
-arrow-array = { path = "../arrow-rs/arrow-array" }
-arrow-buffer = { path = "../arrow-rs/arrow-buffer" }
-arrow-cast = { path = "../arrow-rs/arrow-cast" }
-arrow-data = { path = "../arrow-rs/arrow-data" }
-arrow-ipc = { path = "../arrow-rs/arrow-ipc" }
-arrow-schema = { path = "../arrow-rs/arrow-schema" }
-arrow-select = { path = "../arrow-rs/arrow-select" }
-arrow-string = { path = "../arrow-rs/arrow-string" }
-arrow-ord = { path = "../arrow-rs/arrow-ord" }
-arrow-flight = { path = "../arrow-rs/arrow-flight" }
-parquet = { path = "../arrow-rs/parquet" }
