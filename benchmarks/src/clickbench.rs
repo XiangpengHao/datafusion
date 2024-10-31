@@ -24,7 +24,6 @@ use std::sync::Arc;
 use crate::util::{BenchmarkRun, CommonOpt};
 use arrow::ipc::reader::FileReader;
 use arrow::util::pretty;
-use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
 use datafusion::execution::cache::cache_unit::Cache37;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::physical_plan::collect;
@@ -332,6 +331,7 @@ impl RunOpt {
         };
 
         let mut options: ParquetReadOptions<'_> = Default::default();
+        use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
         options.reader = Some(Arc::new(Parquet7FileReaderFactory::new(object_store)));
 
         ctx.register_parquet("hits", &path, options)

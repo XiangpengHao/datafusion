@@ -36,6 +36,9 @@ snmalloc = ["snmalloc-rs"]
 
 [dependencies]
 arrow = { workspace = true }
+arrow-flight = { workspace = true }
+arrow-schema = { workspace = true }
+dashmap = { workspace = true }
 datafusion = { workspace = true, default-features = true }
 datafusion-common = { workspace = true, default-features = true }
 env_logger = { workspace = true }
@@ -45,14 +48,18 @@ mimalloc = { version = "0.1", optional = true, default-features = false }
 num_cpus = { workspace = true }
 object_store = { workspace = true, features = ["aws"] }
 parquet = { workspace = true, default-features = true }
+pprof = { version = "0.13", features = ["flamegraph"] }
+prost = { workspace = true }
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = { workspace = true }
 snmalloc-rs = { version = "0.3", optional = true }
 structopt = { version = "0.3", default-features = false }
+sysinfo = "0.32.0"
 test-utils = { path = "../test-utils/", version = "0.1.0" }
 tokio = { workspace = true, features = ["rt-multi-thread", "parking_lot"] }
+tonic = "0.12.1"
 url.workspace = true
-pprof = { version = "0.13", features = ["flamegraph"] }
+uuid = "1.7"
 
 [dev-dependencies]
 datafusion-proto = { workspace = true }

@@ -164,6 +164,10 @@ impl BenchmarkRun {
 
     /// Stringify data into formatted json
     pub fn to_json(&self) -> String {
+        let pid = sysinfo::get_current_pid().unwrap();
+        let sys = sysinfo::System::new_all();
+        let process = sys.process(pid).unwrap();
+
         let mut output = HashMap::<&str, Value>::new();
         output.insert("context", serde_json::to_value(&self.context).unwrap());
         output.insert("queries", serde_json::to_value(&self.queries).unwrap());
@@ -185,6 +189,11 @@ impl BenchmarkRun {
                     .unwrap_or(0),
             )
             .unwrap(),
+        );
+        output.insert("memory", serde_json::to_value(&process.memory()).unwrap());
+        output.insert(
+            "virtual_memory",
+            serde_json::to_value(&process.virtual_memory()).unwrap(),
         );
         serde_json::to_string_pretty(&output).unwrap()
     }
