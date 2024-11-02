@@ -55,6 +55,7 @@ members = [
     "benchmarks",
     "datafusion/macros",
     "datafusion/doc",
+    "datafusion/flight-table",
 ]
 resolver = "2"
 
@@ -179,4 +180,3 @@ large_futures = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tarpaulin)"] }
 unused_qualifications = "deny"
 unused_imports = "deny"
-
