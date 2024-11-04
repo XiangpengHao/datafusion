@@ -28,6 +28,7 @@ use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightClient, FlightEndpoint, Ticket};
 use arrow_schema::SchemaRef;
+use datafusion::config::ConfigOptions;
 use datafusion_common::arrow::datatypes::ToByteSlice;
 use datafusion_common::Result;
 use datafusion_common::{project_schema, DataFusionError};
@@ -57,6 +58,7 @@ impl FlightExec {
         metadata: FlightMetadata,
         projection: Option<&Vec<usize>>,
         origin: &str,
+        limit: Option<usize>,
     ) -> Result<Self> {
         let partitions = metadata
             .info
@@ -71,6 +73,7 @@ impl FlightExec {
             schema,
             partitions,
             properties: metadata.props,
+            limit,
         };
         let exec_mode = if config.properties.unbounded_stream {
             ExecutionMode::Unbounded
@@ -103,6 +106,7 @@ pub(crate) struct FlightConfig {
     schema: SchemaRef,
     partitions: Arc<[FlightPartition]>,
     properties: FlightProperties,
+    limit: Option<usize>,
 }
 
 /// The minimum information required for fetching a flight stream.
@@ -259,5 +263,20 @@ impl ExecutionPlan for FlightExec {
             self.schema(),
             stream,
         )))
+    }
+
+    fn fetch(&self) -> Option<usize> {
+        self.config.limit
+    }
+
+    fn repartitioned(
+        &self,
+        _target_partitions: usize,
+        _config: &ConfigOptions,
+    ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
+        let mut new_plan = self.clone();
+        new_plan.plan_properties.partitioning =
+            Partitioning::UnknownPartitioning(self.config.partitions.len());
+        Ok(Some(Arc::new(new_plan)))
     }
 }

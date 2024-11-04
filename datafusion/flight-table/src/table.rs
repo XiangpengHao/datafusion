@@ -217,6 +217,7 @@ impl TableProvider for FlightTable {
             metadata,
             projection,
             &self.origin,
+            limit,
         )?))
     }
 
