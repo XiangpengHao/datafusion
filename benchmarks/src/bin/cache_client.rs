@@ -76,6 +76,7 @@ impl AllQueries {
 
 #[tokio::main]
 async fn main() -> datafusion::common::Result<()> {
+    env_logger::init();
     let options = Options::from_args();
     let all_queries = AllQueries::try_new(options.queries_path.as_path())?;
 
@@ -89,7 +90,7 @@ async fn main() -> datafusion::common::Result<()> {
         .options_mut()
         .execution
         .parquet
-        .pushdown_filters = true;
+        .pushdown_filters = false;
 
     let flight_sql = FlightTableFactory::new(Arc::new(FlightSqlDriver::default()));
     let table = flight_sql

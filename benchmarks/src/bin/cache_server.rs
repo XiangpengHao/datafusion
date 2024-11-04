@@ -32,7 +32,6 @@ use arrow_flight::{
 };
 use dashmap::DashMap;
 use datafusion::logical_expr::LogicalPlan;
-use datafusion::physical_plan::display::DisplayableExecutionPlan;
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
 use futures::{Stream, TryStreamExt};
@@ -81,9 +80,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr = "0.0.0.0:50051".parse()?;
 
-    let session_config = SessionConfig::from_env()
+    let mut session_config = SessionConfig::from_env()
         .map_err(|e| Status::internal(format!("Error building plan: {e}")))?
         .with_information_schema(true);
+
+    session_config
+        .options_mut()
+        .execution
+        .parquet
+        .pushdown_filters = true;
+
     let ctx = Arc::new(SessionContext::new_with_config(session_config));
 
     // register parquet file with the execution context
@@ -268,7 +274,10 @@ impl FlightSqlService for FlightSqlServiceImpl {
         info!("getting results for {handle}");
         let execution_plan = self.get_result(&handle)?;
 
-        let displayable = DisplayableExecutionPlan::new(execution_plan.as_ref());
+        let displayable =
+            datafusion::physical_plan::display::DisplayableExecutionPlan::with_metrics(
+                execution_plan.as_ref(),
+            );
         info!("physical plan:\n{}", displayable.indent(true));
 
         let ctx = self.get_ctx(&request)?;

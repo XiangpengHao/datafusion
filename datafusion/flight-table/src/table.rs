@@ -24,6 +24,7 @@ use datafusion_physical_plan::ExecutionPlan;
 use datafusion_sql::unparser::dialect::PostgreSqlDialect;
 use datafusion_sql::unparser::Unparser;
 use datafusion_sql::TableReference;
+use log::info;
 use serde::{Deserialize, Serialize};
 use tonic::transport::{Channel, ClientTlsConfig};
 
@@ -202,7 +203,7 @@ impl TableProvider for FlightTable {
             let unparsed_sql = unparser
                 .plan_to_sql(&LogicalPlan::TableScan(logical_plan))
                 .unwrap();
-            println!("unparsed sql: {}", unparsed_sql);
+            info!("unparsed sql: {}", unparsed_sql);
             unparsed_sql.to_string()
         };
 

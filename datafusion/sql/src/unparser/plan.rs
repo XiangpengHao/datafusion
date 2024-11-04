@@ -152,8 +152,8 @@ impl Unparser<'_> {
         // If no projection is set, add a wildcard projection to the select
         // which will be translated to `SELECT *` in the SQL statement
         if !select_builder.already_projected() {
-            select_builder.projection(vec![ast::SelectItem::Wildcard(
-                ast::WildcardAdditionalOptions::default(),
+            select_builder.projection(vec![ast::SelectItem::UnnamedExpr(
+                ast::Expr::Identifier(ast::Ident::new("1")),
             )]);
         }
 
