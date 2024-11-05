@@ -18,27 +18,33 @@
 //! Execution plan for reading flights from Arrow Flight services
 
 use std::any::Any;
-use std::error::Error;
 use std::fmt::{Debug, Formatter};
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::task::{ready, Context, Poll};
 
+use crate::metrics::{FlightStreamMetrics, FlightTableMetrics};
 use crate::table::{flight_channel, to_df_err, FlightMetadata, FlightProperties};
-use arrow_flight::error::FlightError;
+use arrow_array::RecordBatch;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightClient, FlightEndpoint, Ticket};
 use arrow_schema::SchemaRef;
 use datafusion::config::ConfigOptions;
 use datafusion_common::arrow::datatypes::ToByteSlice;
+use datafusion_common::project_schema;
 use datafusion_common::Result;
-use datafusion_common::{project_schema, DataFusionError};
-use datafusion_execution::{SendableRecordBatchStream, TaskContext};
+use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::{EquivalenceProperties, Partitioning};
+use datafusion_physical_plan::metrics::{
+    BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet,
+};
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion_physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, PlanProperties,
 };
-use futures::TryStreamExt;
+use futures::future::BoxFuture;
+use futures::{Stream, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tonic::metadata::{AsciiMetadataKey, MetadataMap};
 
@@ -48,6 +54,7 @@ pub(crate) struct FlightExec {
     config: FlightConfig,
     plan_properties: PlanProperties,
     metadata_map: Arc<MetadataMap>,
+    metrics: ExecutionPlanMetricsSet,
 }
 
 impl FlightExec {
@@ -92,10 +99,14 @@ impl FlightExec {
             let value = v.parse().expect("invalid header value");
             mm.insert(key, value);
         }
+
+        let metrics = ExecutionPlanMetricsSet::new();
+
         Ok(Self {
             config,
             plan_properties,
             metadata_map: Arc::from(mm),
+            metrics,
         })
     }
 }
@@ -112,7 +123,7 @@ pub(crate) struct FlightConfig {
 /// The minimum information required for fetching a flight stream.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct FlightPartition {
-    locations: Arc<[String]>,
+    locations: String,
     ticket: FlightTicket,
 }
 
@@ -138,7 +149,7 @@ impl Debug for FlightTicket {
 impl FlightPartition {
     fn new(endpoint: &FlightEndpoint, fallback_location: String) -> Self {
         let locations = if endpoint.location.is_empty() {
-            [fallback_location].into()
+            fallback_location
         } else {
             endpoint
                 .location
@@ -175,35 +186,21 @@ async fn flight_stream(
     partition: FlightPartition,
     schema: SchemaRef,
     grpc_headers: Arc<MetadataMap>,
+    mut flight_metrics: FlightTableMetrics,
 ) -> Result<SendableRecordBatchStream> {
-    let mut errors: Vec<Box<dyn Error + Send + Sync>> = vec![];
-    for loc in partition.locations.iter() {
-        let client = flight_client(loc, grpc_headers.as_ref()).await?;
-        match try_fetch_stream(client, &partition.ticket, schema.clone()).await {
-            Ok(stream) => return Ok(stream),
-            Err(e) => errors.push(Box::new(e)),
-        }
-    }
-    let err = errors.into_iter().last().unwrap_or_else(|| {
-        Box::new(FlightError::ProtocolError(format!(
-            "No available location for endpoint {:?}",
-            partition.locations
-        )))
-    });
-    Err(DataFusionError::External(err))
-}
+    flight_metrics.time_creating_client.start();
+    let mut client = flight_client(partition.locations, grpc_headers.as_ref()).await?;
+    flight_metrics.time_creating_client.stop();
 
-async fn try_fetch_stream(
-    mut client: FlightClient,
-    ticket: &FlightTicket,
-    schema: SchemaRef,
-) -> arrow_flight::error::Result<SendableRecordBatchStream> {
-    let ticket = Ticket::new(ticket.0.to_vec());
-    let stream = client.do_get(ticket).await?.map_err(to_df_err);
-    Ok(Box::pin(RecordBatchStreamAdapter::new(
+    let ticket = Ticket::new(partition.ticket.0.to_vec());
+    flight_metrics.time_getting_stream.start();
+    let stream = client.do_get(ticket).await.unwrap().map_err(to_df_err);
+    flight_metrics.time_getting_stream.stop();
+
+    return Ok(Box::pin(RecordBatchStreamAdapter::new(
         schema.clone(),
         stream,
-    )))
+    )));
 }
 
 impl DisplayAs for FlightExec {
@@ -217,8 +214,10 @@ impl DisplayAs for FlightExec {
             ),
             DisplayFormatType::Verbose => write!(
                 f,
-                "FlightExec: origin={}, partitions={:?}, properties={:?}",
-                self.config.origin, self.config.partitions, self.config.properties,
+                "FlightExec: origin={}, streams={}, properties={:?}",
+                self.config.origin,
+                self.config.partitions.len(),
+                self.config.properties,
             ),
         }
     }
@@ -253,16 +252,23 @@ impl ExecutionPlan for FlightExec {
         partition: usize,
         _context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
+        let flight_metrics = FlightTableMetrics::new(&self.metrics, partition);
         let future_stream = flight_stream(
             self.config.partitions[partition].clone(),
             self.schema(),
             self.metadata_map.clone(),
+            flight_metrics,
         );
-        let stream = futures::stream::once(future_stream).try_flatten();
-        Ok(Box::pin(RecordBatchStreamAdapter::new(
-            self.schema(),
-            stream,
-        )))
+        let stream_metrics = FlightStreamMetrics::new(&self.metrics, partition);
+        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        Ok(Box::pin(FlightStream {
+            metrics: stream_metrics,
+            baseline_metrics,
+            _partition: partition,
+            state: FlightStreamState::Init,
+            future_stream: Some(Box::pin(future_stream)),
+            schema: self.schema().clone(),
+        }))
     }
 
     fn fetch(&self) -> Option<usize> {
@@ -278,5 +284,72 @@ impl ExecutionPlan for FlightExec {
         new_plan.plan_properties.partitioning =
             Partitioning::UnknownPartitioning(self.config.partitions.len());
         Ok(Some(Arc::new(new_plan)))
+    }
+
+    fn metrics(&self) -> Option<MetricsSet> {
+        Some(self.metrics.clone_inner())
+    }
+}
+
+enum FlightStreamState {
+    Init,
+    GetStream(BoxFuture<'static, Result<SendableRecordBatchStream>>),
+    Processing(SendableRecordBatchStream),
+}
+
+struct FlightStream {
+    metrics: FlightStreamMetrics,
+    baseline_metrics: BaselineMetrics,
+    _partition: usize,
+    state: FlightStreamState,
+    future_stream: Option<BoxFuture<'static, Result<SendableRecordBatchStream>>>,
+    schema: SchemaRef,
+}
+
+impl FlightStream {
+    fn poll_inner(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<RecordBatch>>> {
+        loop {
+            match &mut self.state {
+                FlightStreamState::Init => {
+                    self.metrics.time_reading_total.start();
+                    self.state =
+                        FlightStreamState::GetStream(self.future_stream.take().unwrap());
+                    continue;
+                }
+                FlightStreamState::GetStream(fut) => {
+                    let stream = ready!(fut.as_mut().poll(cx)).unwrap();
+                    self.state = FlightStreamState::Processing(stream);
+                    continue;
+                }
+                FlightStreamState::Processing(stream) => {
+                    let result = stream.as_mut().poll_next(cx);
+                    self.metrics.poll_count.add(1);
+                    return result;
+                }
+            }
+        }
+    }
+}
+
+impl Stream for FlightStream {
+    type Item = Result<RecordBatch>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        self.metrics.time_processing.start();
+        let result = self.poll_inner(cx);
+        self.metrics.time_processing.stop();
+        if let Poll::Ready(None) = result {
+            self.metrics.time_reading_total.stop();
+        }
+        self.baseline_metrics.record_poll(result)
+    }
+}
+
+impl RecordBatchStream for FlightStream {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
     }
 }

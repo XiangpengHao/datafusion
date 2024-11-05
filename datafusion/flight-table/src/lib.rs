@@ -16,6 +16,7 @@
 // under the License.
 
 mod exec;
+mod metrics;
 pub mod sql;
 mod table;
 pub use table::FlightTableFactory;

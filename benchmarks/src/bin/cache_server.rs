@@ -60,6 +60,9 @@ macro_rules! status {
 struct Options {
     #[structopt(short, long)]
     path: PathBuf,
+
+    #[structopt(long)]
+    partitions: Option<usize>,
 }
 
 #[tokio::main]
@@ -82,7 +85,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut session_config = SessionConfig::from_env()
         .map_err(|e| Status::internal(format!("Error building plan: {e}")))?
-        .with_information_schema(true);
+        .with_information_schema(true)
+        .with_target_partitions(options.partitions.unwrap_or(num_cpus::get()));
 
     session_config
         .options_mut()
@@ -275,10 +279,10 @@ impl FlightSqlService for FlightSqlServiceImpl {
         let execution_plan = self.get_result(&handle)?;
 
         let displayable =
-            datafusion::physical_plan::display::DisplayableExecutionPlan::with_metrics(
+            datafusion::physical_plan::display::DisplayableExecutionPlan::new(
                 execution_plan.as_ref(),
             );
-        info!("physical plan:\n{}", displayable.indent(true));
+        info!("physical plan:\n{}", displayable.indent(false));
 
         let ctx = self.get_ctx(&request)?;
 

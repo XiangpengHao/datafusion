@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::path::Path;
@@ -35,6 +36,9 @@ use datafusion::{
 };
 use datafusion_common::exec_datafusion_err;
 use datafusion_common::instant::Instant;
+use datafusion_flight_table::sql::FlightSqlDriver;
+use datafusion_flight_table::sql::USERNAME;
+use datafusion_flight_table::FlightTableFactory;
 use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
 use parquet::arrow::arrow_cache::ArrowArrayCache;
@@ -102,6 +106,9 @@ pub struct RunOpt {
     /// Predicate pushdown
     #[structopt(long)]
     pushdown_filters: bool,
+
+    #[structopt(long)]
+    flight_cache: Option<String>,
 }
 
 struct AllQueries {
@@ -179,7 +186,7 @@ impl RunOpt {
         config.options_mut().execution.parquet.pushdown_filters = self.pushdown_filters;
 
         let ctx = SessionContext::new_with_config(config);
-        self.register_hits(&ctx).await?;
+        self.register_hits(&ctx, &self.flight_cache).await?;
 
         let iterations = self.common.iterations;
         let mut benchmark_run = BenchmarkRun::new();
@@ -307,40 +314,64 @@ impl RunOpt {
     }
 
     /// Registers the `hits.parquet` as a table named `hits`
-    async fn register_hits(&self, ctx: &SessionContext) -> Result<()> {
+    async fn register_hits(
+        &self,
+        ctx: &SessionContext,
+        flight_cache: &Option<String>,
+    ) -> Result<()> {
         let path = self.path.as_os_str().to_str().unwrap();
 
-        let object_store: Arc<dyn ObjectStore> = if path.starts_with("minio://") {
-            let url = Url::parse(path).unwrap();
-            let bucket_name = url.host_str().unwrap_or("parquet-oo");
-            let object_store = AmazonS3Builder::new()
-                .with_bucket_name(bucket_name)
-                .with_endpoint("http://c220g5-110910.wisc.cloudlab.us:9000")
-                .with_allow_http(true)
-                .with_region("us-east-1")
-                .with_access_key_id(env::var("MINIO_ACCESS_KEY_ID").unwrap())
-                .with_secret_access_key(env::var("MINIO_SECRET_ACCESS_KEY").unwrap())
-                .build()?;
-            let object_store = Arc::new(object_store);
-            ctx.register_object_store(&url, object_store.clone());
-            object_store
-        } else {
-            let url = ObjectStoreUrl::local_filesystem();
-            let object_store = ctx.runtime_env().object_store(url).unwrap();
-            Arc::new(object_store)
-        };
+        match flight_cache {
+            Some(flight_cache) => {
+                let flight_sql =
+                    FlightTableFactory::new(Arc::new(FlightSqlDriver::default()));
+                let table = flight_sql
+                    .open_table(
+                        flight_cache,
+                        HashMap::from([(USERNAME.into(), "whatever".into())]),
+                        "hits",
+                    )
+                    .await?;
+                ctx.register_table("hits", Arc::new(table))?;
+                Ok(())
+            }
+            None => {
+                let object_store: Arc<dyn ObjectStore> = if path.starts_with("minio://") {
+                    let url = Url::parse(path).unwrap();
+                    let bucket_name = url.host_str().unwrap_or("parquet-oo");
+                    let object_store = AmazonS3Builder::new()
+                        .with_bucket_name(bucket_name)
+                        .with_endpoint("http://c220g5-110910.wisc.cloudlab.us:9000")
+                        .with_allow_http(true)
+                        .with_region("us-east-1")
+                        .with_access_key_id(env::var("MINIO_ACCESS_KEY_ID").unwrap())
+                        .with_secret_access_key(
+                            env::var("MINIO_SECRET_ACCESS_KEY").unwrap(),
+                        )
+                        .build()?;
+                    let object_store = Arc::new(object_store);
+                    ctx.register_object_store(&url, object_store.clone());
+                    object_store
+                } else {
+                    let url = ObjectStoreUrl::local_filesystem();
+                    let object_store = ctx.runtime_env().object_store(url).unwrap();
+                    Arc::new(object_store)
+                };
 
-        let mut options: ParquetReadOptions<'_> = Default::default();
-        use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
-        options.reader = Some(Arc::new(Parquet7FileReaderFactory::new(object_store)));
+                let mut options: ParquetReadOptions<'_> = Default::default();
+                use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
+                options.reader =
+                    Some(Arc::new(Parquet7FileReaderFactory::new(object_store)));
 
-        ctx.register_parquet("hits", &path, options)
-            .await
-            .map_err(|e| {
-                DataFusionError::Context(
-                    format!("Registering 'hits' as {path}"),
-                    Box::new(e),
-                )
-            })
+                ctx.register_parquet("hits", &path, options)
+                    .await
+                    .map_err(|e| {
+                        DataFusionError::Context(
+                            format!("Registering 'hits' as {path}"),
+                            Box::new(e),
+                        )
+                    })
+            }
+        }
     }
 }

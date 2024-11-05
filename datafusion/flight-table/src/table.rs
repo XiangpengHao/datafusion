@@ -26,7 +26,7 @@ use datafusion_sql::unparser::Unparser;
 use datafusion_sql::TableReference;
 use log::info;
 use serde::{Deserialize, Serialize};
-use tonic::transport::{Channel, ClientTlsConfig};
+use tonic::transport::Channel;
 
 /// Generic Arrow Flight data source. Requires a [FlightDriver] that allows implementors
 /// to integrate any custom Flight RPC service by producing a [FlightMetadata] for some DDL.
@@ -249,10 +249,9 @@ pub(crate) fn to_df_err<E: Error + Send + Sync + 'static>(err: E) -> DataFusionE
 }
 
 pub(crate) async fn flight_channel(source: impl Into<String>) -> Result<Channel> {
-    let tls_config = ClientTlsConfig::new().with_enabled_roots();
+    // No tls here, to avoid the overhead of TLS
+    // we assume both server and client are running on the trusted network.
     Channel::from_shared(source.into())
-        .map_err(to_df_err)?
-        .tls_config(tls_config)
         .map_err(to_df_err)?
         .connect()
         .await
