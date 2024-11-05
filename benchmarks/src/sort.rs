@@ -22,9 +22,8 @@ use crate::util::{AccessLogOpt, BenchmarkRun, CommonOpt};
 
 use arrow::util::pretty;
 use datafusion::common::Result;
-use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
 use datafusion::execution::cache::cache_unit::Cache37;
-use datafusion::physical_expr::PhysicalSortExpr;
+use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
 use datafusion::physical_plan::collect;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::prelude::{SessionConfig, SessionContext};

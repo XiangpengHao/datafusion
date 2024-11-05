@@ -45,8 +45,6 @@ use parquet::arrow::arrow_cache::ArrowArrayCache;
 use structopt::StructOpt;
 use url::Url;
 
-use crate::{BenchmarkRun, CommonOpt};
-
 use arrow::ipc::writer::FileWriter;
 
 /// Run the clickbench benchmark

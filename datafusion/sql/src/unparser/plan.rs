@@ -153,7 +153,7 @@ impl Unparser<'_> {
         // which will be translated to `SELECT *` in the SQL statement
         if !select_builder.already_projected() {
             select_builder.projection(vec![ast::SelectItem::UnnamedExpr(
-                ast::Expr::Identifier(ast::Ident::new("1")),
+                ast::Expr::Identifier(Ident::new("1")),
             )]);
         }
 
