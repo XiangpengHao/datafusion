@@ -1,6 +1,6 @@
 [package]
 name = "datafusion-flight-table"
-version = "42.0.0"
+version = "43.0.0"
 readme = "README.md"
 edition = "2021"
 repository = "https://github.com/datafusion-contrib/datafusion-table-providers"
