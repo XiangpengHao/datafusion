@@ -36,9 +36,7 @@ use datafusion_common::project_schema;
 use datafusion_common::Result;
 use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::{EquivalenceProperties, Partitioning};
-use datafusion_physical_plan::metrics::{
-    BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet,
-};
+use datafusion_physical_plan::metrics::{ExecutionPlanMetricsSet, MetricsSet};
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion_physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, PlanProperties,
@@ -260,10 +258,8 @@ impl ExecutionPlan for FlightExec {
             flight_metrics,
         );
         let stream_metrics = FlightStreamMetrics::new(&self.metrics, partition);
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
         Ok(Box::pin(FlightStream {
             metrics: stream_metrics,
-            baseline_metrics,
             _partition: partition,
             state: FlightStreamState::Init,
             future_stream: Some(Box::pin(future_stream)),
@@ -299,7 +295,6 @@ enum FlightStreamState {
 
 struct FlightStream {
     metrics: FlightStreamMetrics,
-    baseline_metrics: BaselineMetrics,
     _partition: usize,
     state: FlightStreamState,
     future_stream: Option<BoxFuture<'static, Result<SendableRecordBatchStream>>>,
@@ -341,10 +336,19 @@ impl Stream for FlightStream {
         self.metrics.time_processing.start();
         let result = self.poll_inner(cx);
         self.metrics.time_processing.stop();
-        if let Poll::Ready(None) = result {
-            self.metrics.time_reading_total.stop();
+        match result {
+            Poll::Ready(Some(Ok(batch))) => {
+                self.metrics.output_rows.add(batch.num_rows());
+                return Poll::Ready(Some(Ok(batch)));
+            }
+            Poll::Ready(None) | Poll::Ready(Some(Err(_))) => {
+                self.metrics.time_reading_total.stop();
+                return Poll::Ready(None);
+            }
+            _ => {
+                return Poll::Pending;
+            }
         }
-        self.baseline_metrics.record_poll(result)
     }
 }
 

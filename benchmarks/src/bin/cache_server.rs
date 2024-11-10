@@ -35,7 +35,7 @@ use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
 use futures::{Stream, TryStreamExt};
-use log::info;
+use log::{debug, info};
 use mimalloc::MiMalloc;
 use prost::Message;
 use std::path::PathBuf;
@@ -67,7 +67,7 @@ struct Options {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    env_logger::builder().format_timestamp(None).init();
     let options = Options::from_args();
 
     let file_name = options
@@ -93,6 +93,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .execution
         .parquet
         .pushdown_filters = true;
+
+    session_config
+        .options_mut()
+        .execution
+        .parquet
+        .schema_force_view_types = false;
 
     let ctx = Arc::new(SessionContext::new_with_config(session_config));
 
@@ -155,7 +161,7 @@ impl FlightSqlServiceImpl {
         .map_err(|e| status!("Error registering table", e))?;
 
         self.contexts.insert(uuid.clone(), ctx);
-        info!("Created context with uuid: {uuid}");
+        debug!("Created context with uuid: {uuid}");
         Ok(uuid)
     }
 
@@ -275,14 +281,14 @@ impl FlightSqlService for FlightSqlServiceImpl {
 
         let handle = fetch_results.handle;
 
-        info!("getting results for {handle}");
+        debug!("getting results for {handle}");
         let execution_plan = self.get_result(&handle)?;
 
         let displayable =
             datafusion::physical_plan::display::DisplayableExecutionPlan::new(
                 execution_plan.as_ref(),
             );
-        info!("physical plan:\n{}", displayable.indent(false));
+        debug!("physical plan:\n{}", displayable.indent(false));
 
         let ctx = self.get_ctx(&request)?;
 
@@ -309,7 +315,7 @@ impl FlightSqlService for FlightSqlServiceImpl {
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
         let user_query = cmd.query.as_str();
-        info!("get_flight_info_statement, user_query: {user_query}");
+        info!("running query: {user_query}");
 
         let ctx = self.get_ctx(&request)?;
 

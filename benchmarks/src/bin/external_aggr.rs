@@ -177,7 +177,7 @@ impl ExternalAggrConfig {
 
             let query_results = self.benchmark_query(query_id, mem_limit).await?;
             for iter in query_results {
-                benchmark_run.write_iter(iter.elapsed, iter.row_count);
+                benchmark_run.write_iter(iter.elapsed, iter.row_count, 0);
             }
         }
 

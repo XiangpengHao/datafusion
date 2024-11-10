@@ -305,7 +305,9 @@ impl RunOpt {
             }
         }
 
-        benchmark_run.set_arrow_cache_stats(ArrowArrayCache::get().stats());
+        if self.flight_cache.is_none() {
+            benchmark_run.set_arrow_cache_stats(ArrowArrayCache::get().stats());
+        }
         benchmark_run.set_parquet_cache_stats(Cache37::memory_usage());
         benchmark_run.maybe_write_json(self.output_path.as_ref())?;
         Ok(())
