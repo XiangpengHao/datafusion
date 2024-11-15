@@ -59,6 +59,7 @@ impl FlightTableFactory {
         let num_rows = precision(metadata.info.total_records);
         let total_byte_size = precision(metadata.info.total_bytes);
         let logical_schema = metadata.schema;
+        println!("logical schema: {:?}", logical_schema);
         let stats = Statistics {
             num_rows,
             total_byte_size,

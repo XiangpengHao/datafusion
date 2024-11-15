@@ -68,11 +68,10 @@ use arrow::compute::kernels;
 use arrow::datatypes::{DataType, Schema};
 use arrow::error::{ArrowError, Result as ArrowResult};
 use arrow::record_batch::RecordBatch;
-use arrow_array::Array;
 use arrow_schema::Field;
 use datafusion_expr::{ColumnarValue, Operator};
 use datafusion_physical_expr_common::datum::apply_cmp;
-use parquet::arrow::arrow_cache::etc_array::EtcStringArray;
+use parquet::arrow::arrow_cache::etc_array::{AsEtcArray, EtcArray, EtcArrayRef};
 use parquet::arrow::arrow_reader::{ArrowPredicate, RowFilter};
 use parquet::arrow::ProjectionMask;
 use parquet::file::metadata::ParquetMetaData;
@@ -202,7 +201,7 @@ impl ArrowPredicate for DatafusionArrowPredicate {
             return self.evaluate(batch.clone());
         }
 
-        if let Some(array) = input.downcast_ref::<EtcStringArray>() {
+        if let Some(array) = input.downcast_ref::<EtcArrayRef>() {
             if let Some(binary_expr) =
                 self.physical_expr.as_any().downcast_ref::<BinaryExpr>()
             {
@@ -210,58 +209,56 @@ impl ArrowPredicate for DatafusionArrowPredicate {
                     binary_expr.right().as_any().downcast_ref::<Literal>()
                 {
                     let op = binary_expr.op();
-                    if op == &Operator::Eq {
-                        if let ScalarValue::Utf8(Some(v)) = literal.value() {
-                            let result = array.compare_equals(&v);
-                            return Ok(result);
+                    if let Some(array) = array.as_string_array_opt() {
+                        if op == &Operator::Eq {
+                            if let ScalarValue::Utf8(Some(v)) = literal.value() {
+                                let result = array.compare_equals(&v);
+                                return Ok(result);
+                            };
+                        } else if op == &Operator::NotEq {
+                            if let ScalarValue::Utf8(Some(v)) = literal.value() {
+                                let result = array.compare_not_equals(&v);
+                                return Ok(result);
+                            };
+                        }
+
+                        let dict_array = array.to_dict_string();
+                        let lhs = ColumnarValue::Array(Arc::new(dict_array));
+                        let rhs = ColumnarValue::Scalar(literal.value().clone());
+
+                        let result = match op {
+                            Operator::NotEq => apply_cmp(&lhs, &rhs, kernels::cmp::neq),
+                            Operator::Eq => apply_cmp(&lhs, &rhs, kernels::cmp::eq),
+                            Operator::Lt => apply_cmp(&lhs, &rhs, kernels::cmp::lt),
+                            Operator::LtEq => apply_cmp(&lhs, &rhs, kernels::cmp::lt_eq),
+                            Operator::Gt => apply_cmp(&lhs, &rhs, kernels::cmp::gt),
+                            Operator::GtEq => apply_cmp(&lhs, &rhs, kernels::cmp::gt_eq),
+                            Operator::LikeMatch => {
+                                apply_cmp(&lhs, &rhs, arrow::compute::like)
+                            }
+                            Operator::ILikeMatch => {
+                                apply_cmp(&lhs, &rhs, arrow::compute::ilike)
+                            }
+                            Operator::NotLikeMatch => {
+                                apply_cmp(&lhs, &rhs, arrow::compute::nlike)
+                            }
+                            Operator::NotILikeMatch => {
+                                apply_cmp(&lhs, &rhs, arrow::compute::nilike)
+                            }
+                            _ => panic!("unsupported operator: {:?}", op),
                         };
-                    } else if op == &Operator::NotEq {
-                        if let ScalarValue::Utf8(Some(v)) = literal.value() {
-                            let result = array.compare_not_equals(&v);
-                            return Ok(result);
-                        };
-                    }
-
-                    let dict_array = array.to_dict_string();
-
-                    let lhs = ColumnarValue::Array(Arc::new(dict_array));
-                    let rhs = ColumnarValue::Scalar(literal.value().clone());
-
-                    let result = match op {
-                        Operator::NotEq => apply_cmp(&lhs, &rhs, kernels::cmp::neq),
-                        Operator::Eq => apply_cmp(&lhs, &rhs, kernels::cmp::eq),
-                        Operator::Lt => apply_cmp(&lhs, &rhs, kernels::cmp::lt),
-                        Operator::LtEq => apply_cmp(&lhs, &rhs, kernels::cmp::lt_eq),
-                        Operator::Gt => apply_cmp(&lhs, &rhs, kernels::cmp::gt),
-                        Operator::GtEq => apply_cmp(&lhs, &rhs, kernels::cmp::gt_eq),
-                        Operator::LikeMatch => {
-                            apply_cmp(&lhs, &rhs, arrow::compute::like)
+                        if let Ok(result) = result {
+                            let filtered =
+                                result.into_array(array.len())?.as_boolean().clone();
+                            return Ok(filtered);
                         }
-                        Operator::ILikeMatch => {
-                            apply_cmp(&lhs, &rhs, arrow::compute::ilike)
-                        }
-                        Operator::NotLikeMatch => {
-                            apply_cmp(&lhs, &rhs, arrow::compute::nlike)
-                        }
-                        Operator::NotILikeMatch => {
-                            apply_cmp(&lhs, &rhs, arrow::compute::nilike)
-                        }
-                        _ => panic!("unsupported operator: {:?}", op),
-                    };
-                    if let Ok(result) = result {
-                        let filtered =
-                            result.into_array(array.len())?.as_boolean().clone();
-                        return Ok(filtered);
                     }
                 }
             }
-            let arrow_array = array.to_dict_string();
+            let arrow_array = array.to_arrow_array();
             let schema = Schema::new(vec![Field::new(
-                "_",
-                DataType::Dictionary(
-                    Box::new(DataType::UInt32),
-                    Box::new(DataType::Utf8),
-                ),
+                "",
+                arrow_array.data_type().clone(),
                 arrow_array.is_nullable(),
             )]);
             let record_batch =

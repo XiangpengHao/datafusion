@@ -402,6 +402,9 @@ config_namespace! {
         /// and `Binary/BinaryLarge` with `BinaryView`.
         pub schema_force_view_types: bool, default = true
 
+        /// (reading) If true, parquet reader will operate as a flight cache server
+        pub operate_as_flight_cache: bool, default = false
+
         /// (reading) If true, parquet reader will read columns of
         /// `Binary/LargeBinary` with `Utf8`, and `BinaryView` with `Utf8View`.
         ///

@@ -424,6 +424,56 @@ pub fn transform_schema_to_view(schema: &Schema) -> Schema {
     Schema::new_with_metadata(transformed_fields, schema.metadata.clone())
 }
 
+pub(crate) fn transform_to_flight_cache_types(schema: &Schema) -> Schema {
+    let transformed_fields: Vec<Arc<Field>> = schema
+        .fields
+        .iter()
+        .map(|field| match field.data_type() {
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => {
+                field_with_new_type(
+                    field,
+                    DataType::Dictionary(
+                        Box::new(DataType::UInt16),
+                        Box::new(DataType::Utf8),
+                    ),
+                )
+            }
+            DataType::Binary | DataType::LargeBinary | DataType::BinaryView => {
+                field_with_new_type(
+                    field,
+                    DataType::Dictionary(
+                        Box::new(DataType::UInt16),
+                        Box::new(DataType::Binary),
+                    ),
+                )
+            }
+            _ => field.clone(),
+        })
+        .collect();
+    Schema::new_with_metadata(transformed_fields, schema.metadata.clone())
+}
+
+pub(crate) fn coerce_file_schema_to_flight_cache_types(
+    table_schema: &Schema,
+    file_schema: &Schema,
+) -> Option<Schema> {
+    let mut transform = false;
+    for field in table_schema.fields() {
+        if field.data_type().equals_datatype(&DataType::Dictionary(
+            Box::new(DataType::UInt16),
+            Box::new(DataType::Utf8),
+        )) {
+            transform = true;
+        }
+    }
+
+    if !transform {
+        return None;
+    }
+
+    Some(transform_to_flight_cache_types(file_schema))
+}
+
 /// Coerces the file schema if the table schema uses a view type.
 pub(crate) fn coerce_file_schema_to_view_type(
     table_schema: &Schema,

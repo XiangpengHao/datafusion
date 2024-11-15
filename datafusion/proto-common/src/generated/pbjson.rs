@@ -4922,6 +4922,9 @@ impl serde::Serialize for ParquetOptions {
         if self.binary_as_string {
             len += 1;
         }
+        if self.operate_as_flight_cache {
+            len += 1;
+        }
         if self.dictionary_page_size_limit != 0 {
             len += 1;
         }
@@ -5014,6 +5017,9 @@ impl serde::Serialize for ParquetOptions {
         }
         if self.binary_as_string {
             struct_ser.serialize_field("binaryAsString", &self.binary_as_string)?;
+        }
+        if self.operate_as_flight_cache {
+            struct_ser.serialize_field("operateAsFlightCache", &self.operate_as_flight_cache)?;
         }
         if self.dictionary_page_size_limit != 0 {
             #[allow(clippy::needless_borrow)]
@@ -5143,6 +5149,8 @@ impl<'de> serde::Deserialize<'de> for ParquetOptions {
             "schemaForceViewTypes",
             "binary_as_string",
             "binaryAsString",
+            "operate_as_flight_cache",
+            "operateAsFlightCache",
             "dictionary_page_size_limit",
             "dictionaryPageSizeLimit",
             "data_page_row_count_limit",
@@ -5186,6 +5194,7 @@ impl<'de> serde::Deserialize<'de> for ParquetOptions {
             BloomFilterOnWrite,
             SchemaForceViewTypes,
             BinaryAsString,
+            OperateAsFlightCache,
             DictionaryPageSizeLimit,
             DataPageRowCountLimit,
             MaxRowGroupSize,
@@ -5235,6 +5244,7 @@ impl<'de> serde::Deserialize<'de> for ParquetOptions {
                             "bloomFilterOnWrite" | "bloom_filter_on_write" => Ok(GeneratedField::BloomFilterOnWrite),
                             "schemaForceViewTypes" | "schema_force_view_types" => Ok(GeneratedField::SchemaForceViewTypes),
                             "binaryAsString" | "binary_as_string" => Ok(GeneratedField::BinaryAsString),
+                            "operateAsFlightCache" | "operate_as_flight_cache" => Ok(GeneratedField::OperateAsFlightCache),
                             "dictionaryPageSizeLimit" | "dictionary_page_size_limit" => Ok(GeneratedField::DictionaryPageSizeLimit),
                             "dataPageRowCountLimit" | "data_page_row_count_limit" => Ok(GeneratedField::DataPageRowCountLimit),
                             "maxRowGroupSize" | "max_row_group_size" => Ok(GeneratedField::MaxRowGroupSize),
@@ -5282,6 +5292,7 @@ impl<'de> serde::Deserialize<'de> for ParquetOptions {
                 let mut bloom_filter_on_write__ = None;
                 let mut schema_force_view_types__ = None;
                 let mut binary_as_string__ = None;
+                let mut operate_as_flight_cache__ = None;
                 let mut dictionary_page_size_limit__ = None;
                 let mut data_page_row_count_limit__ = None;
                 let mut max_row_group_size__ = None;
@@ -5395,6 +5406,12 @@ impl<'de> serde::Deserialize<'de> for ParquetOptions {
                             }
                             binary_as_string__ = Some(map_.next_value()?);
                         }
+                        GeneratedField::OperateAsFlightCache => {
+                            if operate_as_flight_cache__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("operateAsFlightCache"));
+                            }
+                            operate_as_flight_cache__ = Some(map_.next_value()?);
+                        }
                         GeneratedField::DictionaryPageSizeLimit => {
                             if dictionary_page_size_limit__.is_some() {
                                 return Err(serde::de::Error::duplicate_field("dictionaryPageSizeLimit"));
@@ -5497,6 +5514,7 @@ impl<'de> serde::Deserialize<'de> for ParquetOptions {
                     bloom_filter_on_write: bloom_filter_on_write__.unwrap_or_default(),
                     schema_force_view_types: schema_force_view_types__.unwrap_or_default(),
                     binary_as_string: binary_as_string__.unwrap_or_default(),
+                    operate_as_flight_cache: operate_as_flight_cache__.unwrap_or_default(),
                     dictionary_page_size_limit: dictionary_page_size_limit__.unwrap_or_default(),
                     data_page_row_count_limit: data_page_row_count_limit__.unwrap_or_default(),
                     max_row_group_size: max_row_group_size__.unwrap_or_default(),

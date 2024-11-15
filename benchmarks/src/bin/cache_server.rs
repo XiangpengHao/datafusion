@@ -100,6 +100,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parquet
         .schema_force_view_types = false;
 
+    session_config
+        .options_mut()
+        .execution
+        .parquet
+        .operate_as_flight_cache = true;
+
     let ctx = Arc::new(SessionContext::new_with_config(session_config));
 
     // register parquet file with the execution context
@@ -293,16 +299,16 @@ impl FlightSqlService for FlightSqlServiceImpl {
         let ctx = self.get_ctx(&request)?;
 
         let schema = execution_plan.schema();
-
+        println!("execution plan schema: {:?}", schema);
         let stream = execution_plan
             .execute(fetch_results.partition as usize, ctx.task_ctx())
-            .map_err(|e| status!("Error executing plan", e))?
+            .unwrap()
+            // .map_err(|e| status!("Error executing plan", e))?
             .map_err(|e| {
-                arrow_flight::error::FlightError::from_external_error(Box::new(e))
+                panic!("Error executing plan: {:?}", e);
             });
 
         let stream = FlightDataEncoderBuilder::new()
-            .with_schema(schema)
             .build(stream)
             .map_err(Status::from);
 

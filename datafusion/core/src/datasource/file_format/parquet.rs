@@ -27,8 +27,9 @@ use super::write::demux::start_demuxer_task;
 use super::write::{create_writer, SharedBuffer};
 use super::{
     coerce_file_schema_to_string_type, coerce_file_schema_to_view_type,
-    transform_binary_to_string, transform_schema_to_view, FileFormat, FileFormatFactory,
-    FilePushdownSupport, FileScanConfig,
+    transform_binary_to_string, transform_schema_to_view,
+    transform_to_flight_cache_types, FileFormat, FileFormatFactory, FilePushdownSupport,
+    FileScanConfig,
 };
 use crate::arrow::array::RecordBatch;
 use crate::arrow::datatypes::{Fields, Schema, SchemaRef};
@@ -258,6 +259,11 @@ impl ParquetFormat {
         self.options.global.schema_force_view_types
     }
 
+    /// If true, will operate as flight cache.
+    pub fn operate_as_flight_cache(&self) -> bool {
+        self.options.global.operate_as_flight_cache
+    }
+
     /// If true, will use view types. See [`Self::force_view_types`] for details
     pub fn with_force_view_types(mut self, use_views: bool) -> Self {
         self.options.global.schema_force_view_types = use_views;
@@ -383,6 +389,12 @@ impl FileFormat for ParquetFormat {
 
         let schema = if self.force_view_types() {
             transform_schema_to_view(&schema)
+        } else {
+            schema
+        };
+
+        let schema = if self.operate_as_flight_cache() {
+            transform_to_flight_cache_types(&schema)
         } else {
             schema
         };

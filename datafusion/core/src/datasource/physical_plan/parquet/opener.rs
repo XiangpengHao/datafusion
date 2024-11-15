@@ -18,7 +18,8 @@
 //! [`ParquetOpener`] for opening Parquet files
 
 use crate::datasource::file_format::{
-    coerce_file_schema_to_string_type, coerce_file_schema_to_view_type,
+    coerce_file_schema_to_flight_cache_types, coerce_file_schema_to_string_type,
+    coerce_file_schema_to_view_type,
 };
 use crate::datasource::physical_plan::parquet::page_filter::PagePruningAccessPlanFilter;
 use crate::datasource::physical_plan::parquet::row_group_filter::RowGroupAccessPlanFilter;
@@ -135,6 +136,12 @@ impl FileOpener for ParquetOpener {
 
             // read with view types
             if let Some(merged) = coerce_file_schema_to_view_type(&table_schema, &schema)
+            {
+                schema = Arc::new(merged);
+            }
+
+            if let Some(merged) =
+                coerce_file_schema_to_flight_cache_types(&table_schema, &schema)
             {
                 schema = Arc::new(merged);
             }
