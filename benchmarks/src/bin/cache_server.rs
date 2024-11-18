@@ -313,7 +313,9 @@ impl FlightSqlService for FlightSqlServiceImpl {
                 panic!("Error executing plan: {:?}", e);
             });
 
+        let ipc_options = IpcWriteOptions::default().with_preserve_dict_id(false);
         let stream = FlightDataEncoderBuilder::new()
+            .with_options(ipc_options)
             .build(stream)
             .map_err(Status::from);
 
