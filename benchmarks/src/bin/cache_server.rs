@@ -31,6 +31,7 @@ use arrow_flight::{
     HandshakeResponse, IpcMessage, SchemaAsIpc, Ticket,
 };
 use dashmap::DashMap;
+use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
@@ -108,14 +109,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ctx = Arc::new(SessionContext::new_with_config(session_config));
 
+    let object_store = {
+        let url = ObjectStoreUrl::local_filesystem();
+        ctx.runtime_env().object_store(url).unwrap()
+    };
+    let mut parquet_options: ParquetReadOptions<'_> = Default::default();
+    use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
+    parquet_options.reader = Some(Arc::new(Parquet7FileReaderFactory::new(object_store)));
+
     // register parquet file with the execution context
-    ctx.register_parquet(
-        &file_name,
-        &options.path.to_string_lossy(),
-        ParquetReadOptions::default(),
-    )
-    .await
-    .map_err(|e| status!("Error registering table", e))?;
+    ctx.register_parquet(&file_name, &options.path.to_string_lossy(), parquet_options)
+        .await
+        .map_err(|e| status!("Error registering table", e))?;
 
     let service = FlightSqlServiceImpl::new(file_name, options.path, ctx);
     info!("Listening on {addr:?}");
@@ -299,7 +304,7 @@ impl FlightSqlService for FlightSqlServiceImpl {
         let ctx = self.get_ctx(&request)?;
 
         let schema = execution_plan.schema();
-        println!("execution plan schema: {:?}", schema);
+        debug!("execution plan schema: {:?}", schema);
         let stream = execution_plan
             .execute(fetch_results.partition as usize, ctx.task_ctx())
             .unwrap()

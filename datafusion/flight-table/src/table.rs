@@ -8,7 +8,7 @@ use crate::exec::FlightExec;
 use crate::sql::FlightSqlDriver;
 use arrow_flight::error::FlightError;
 use arrow_flight::FlightInfo;
-use arrow_schema::SchemaRef;
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::datasource::empty::EmptyTable;
 use datafusion::datasource::DefaultTableSource;
@@ -27,6 +27,25 @@ use datafusion_sql::TableReference;
 use log::info;
 use serde::{Deserialize, Serialize};
 use tonic::transport::Channel;
+
+fn transform_flight_schema_to_original_type(schema: &SchemaRef) -> Schema {
+    let transformed_fields: Vec<Arc<Field>> = schema
+        .fields
+        .iter()
+        .map(|field| match field.data_type() {
+            DataType::Dictionary(key, value) => {
+                if key.as_ref() == &DataType::UInt16 && value.as_ref() == &DataType::Utf8
+                {
+                    Arc::new(field.as_ref().clone().with_data_type(DataType::Utf8))
+                } else {
+                    field.clone()
+                }
+            }
+            _ => field.clone(),
+        })
+        .collect();
+    Schema::new_with_metadata(transformed_fields, schema.metadata.clone())
+}
 
 /// Generic Arrow Flight data source. Requires a [FlightDriver] that allows implementors
 /// to integrate any custom Flight RPC service by producing a [FlightMetadata] for some DDL.
@@ -58,8 +77,9 @@ impl FlightTableFactory {
             .map_err(to_df_err)?;
         let num_rows = precision(metadata.info.total_records);
         let total_byte_size = precision(metadata.info.total_bytes);
-        let logical_schema = metadata.schema;
-        println!("logical schema: {:?}", logical_schema);
+        let output_schema =
+            Arc::new(transform_flight_schema_to_original_type(&metadata.schema));
+        let flight_schema = metadata.schema;
         let stats = Statistics {
             num_rows,
             total_byte_size,
@@ -71,7 +91,8 @@ impl FlightTableFactory {
             options,
             origin,
             table_name: table_name.into(),
-            logical_schema,
+            flight_schema,
+            output_schema,
             stats,
         })
     }
@@ -159,7 +180,8 @@ pub struct FlightTable {
     options: HashMap<String, String>,
     origin: String,
     table_name: TableReference,
-    logical_schema: SchemaRef,
+    flight_schema: SchemaRef,
+    output_schema: SchemaRef,
     stats: Statistics,
 }
 
@@ -170,7 +192,7 @@ impl TableProvider for FlightTable {
     }
 
     fn schema(&self) -> SchemaRef {
-        self.logical_schema.clone()
+        self.output_schema.clone()
     }
 
     fn table_type(&self) -> TableType {
@@ -215,7 +237,8 @@ impl TableProvider for FlightTable {
             .map_err(to_df_err)?;
 
         Ok(Arc::new(FlightExec::try_new(
-            self.logical_schema.clone(),
+            self.flight_schema.clone(),
+            self.output_schema.clone(),
             metadata,
             projection,
             &self.origin,

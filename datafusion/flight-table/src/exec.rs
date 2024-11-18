@@ -31,6 +31,7 @@ use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightClient, FlightEndpoint, Ticket};
 use arrow_schema::SchemaRef;
 use datafusion::config::ConfigOptions;
+use datafusion::datasource::schema_adapter::{DefaultSchemaAdapterFactory, SchemaMapper};
 use datafusion_common::arrow::datatypes::ToByteSlice;
 use datafusion_common::project_schema;
 use datafusion_common::Result;
@@ -53,13 +54,15 @@ pub(crate) struct FlightExec {
     plan_properties: PlanProperties,
     metadata_map: Arc<MetadataMap>,
     metrics: ExecutionPlanMetricsSet,
+    flight_schema: SchemaRef,
 }
 
 impl FlightExec {
     /// Creates a FlightExec with the provided [FlightMetadata]
     /// and origin URL (used as fallback location as per the protocol spec).
     pub fn try_new(
-        logical_schema: SchemaRef,
+        flight_schema: SchemaRef,
+        output_schema: SchemaRef,
         metadata: FlightMetadata,
         projection: Option<&Vec<usize>>,
         origin: &str,
@@ -72,7 +75,7 @@ impl FlightExec {
             .map(|endpoint| FlightPartition::new(endpoint, origin.to_string()))
             .collect();
         let schema =
-            project_schema(&logical_schema, projection).expect("Error projecting schema");
+            project_schema(&output_schema, projection).expect("Error projecting schema");
         let config = FlightConfig {
             origin: origin.into(),
             schema,
@@ -103,6 +106,7 @@ impl FlightExec {
         Ok(Self {
             config,
             plan_properties,
+            flight_schema,
             metadata_map: Arc::from(mm),
             metrics,
         })
@@ -258,12 +262,16 @@ impl ExecutionPlan for FlightExec {
             flight_metrics,
         );
         let stream_metrics = FlightStreamMetrics::new(&self.metrics, partition);
+        let (schema_adapter, _) = DefaultSchemaAdapterFactory::from_schema(self.schema())
+            .map_schema(self.flight_schema.as_ref())
+            .unwrap();
         Ok(Box::pin(FlightStream {
             metrics: stream_metrics,
             _partition: partition,
             state: FlightStreamState::Init,
             future_stream: Some(Box::pin(future_stream)),
-            schema: self.schema().clone(),
+            schema: self.schema(),
+            schema_mapper: schema_adapter,
         }))
     }
 
@@ -299,6 +307,7 @@ struct FlightStream {
     state: FlightStreamState,
     future_stream: Option<BoxFuture<'static, Result<SendableRecordBatchStream>>>,
     schema: SchemaRef,
+    schema_mapper: Arc<dyn SchemaMapper>,
 }
 
 impl FlightStream {
@@ -339,7 +348,8 @@ impl Stream for FlightStream {
         match result {
             Poll::Ready(Some(Ok(batch))) => {
                 self.metrics.output_rows.add(batch.num_rows());
-                return Poll::Ready(Some(Ok(batch)));
+                let new_batch = self.schema_mapper.map_batch(batch).unwrap();
+                return Poll::Ready(Some(Ok(new_batch)));
             }
             Poll::Ready(None) | Poll::Ready(Some(Err(_))) => {
                 self.metrics.time_reading_total.stop();

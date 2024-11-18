@@ -157,6 +157,103 @@ impl DatafusionArrowPredicate {
             schema,
         })
     }
+
+    fn evaluate_etc_array(&mut self, array: &EtcArrayRef) -> ArrowResult<BooleanArray> {
+        if let Some(binary_expr) =
+            self.physical_expr.as_any().downcast_ref::<BinaryExpr>()
+        {
+            if let Some(literal) = binary_expr.right().as_any().downcast_ref::<Literal>()
+            {
+                let op = binary_expr.op();
+                if let Some(array) = array.as_string_array_opt() {
+                    if let Some(needle) = get_string_needle(literal.value()) {
+                        if op == &Operator::Eq {
+                            let result = array.compare_equals(needle);
+                            return Ok(result);
+                        } else if op == &Operator::NotEq {
+                            let result = array.compare_not_equals(needle);
+                            return Ok(result);
+                        }
+                    }
+
+                    let dict_array = array.to_dict_string();
+                    let lhs = ColumnarValue::Array(Arc::new(dict_array));
+                    let rhs = ColumnarValue::Scalar(literal.value().clone());
+
+                    let result = match op {
+                        Operator::NotEq => apply_cmp(&lhs, &rhs, kernels::cmp::neq),
+                        Operator::Eq => apply_cmp(&lhs, &rhs, kernels::cmp::eq),
+                        Operator::Lt => apply_cmp(&lhs, &rhs, kernels::cmp::lt),
+                        Operator::LtEq => apply_cmp(&lhs, &rhs, kernels::cmp::lt_eq),
+                        Operator::Gt => apply_cmp(&lhs, &rhs, kernels::cmp::gt),
+                        Operator::GtEq => apply_cmp(&lhs, &rhs, kernels::cmp::gt_eq),
+                        Operator::LikeMatch => {
+                            apply_cmp(&lhs, &rhs, arrow::compute::like)
+                        }
+                        Operator::ILikeMatch => {
+                            apply_cmp(&lhs, &rhs, arrow::compute::ilike)
+                        }
+                        Operator::NotLikeMatch => {
+                            apply_cmp(&lhs, &rhs, arrow::compute::nlike)
+                        }
+                        Operator::NotILikeMatch => {
+                            apply_cmp(&lhs, &rhs, arrow::compute::nilike)
+                        }
+                        _ => panic!("unsupported operator: {:?}", op),
+                    };
+                    if let Ok(result) = result {
+                        let filtered =
+                            result.into_array(array.len())?.as_boolean().clone();
+                        return Ok(filtered);
+                    }
+                }
+            }
+        } else if let Some(like_expr) =
+            self.physical_expr.as_any().downcast_ref::<LikeExpr>()
+        {
+            if let Some(literal) = like_expr.pattern().as_any().downcast_ref::<Literal>()
+            {
+                let arrow_dict = array.as_string().to_dict_string();
+
+                let lhs = ColumnarValue::Array(Arc::new(arrow_dict));
+                let rhs = ColumnarValue::Scalar(literal.value().clone());
+
+                let result = match (like_expr.negated(), like_expr.case_insensitive()) {
+                    (false, false) => apply_cmp(&lhs, &rhs, arrow::compute::like),
+                    (true, false) => apply_cmp(&lhs, &rhs, arrow::compute::nlike),
+                    (false, true) => apply_cmp(&lhs, &rhs, arrow::compute::ilike),
+                    (true, true) => apply_cmp(&lhs, &rhs, arrow::compute::nilike),
+                };
+                if let Ok(result) = result {
+                    let filtered = result.into_array(array.len())?.as_boolean().clone();
+                    return Ok(filtered);
+                }
+            }
+        }
+        let arrow_array = array.to_arrow_array();
+        let schema = Schema::new(vec![Field::new(
+            "",
+            arrow_array.data_type().clone(),
+            arrow_array.is_nullable(),
+        )]);
+        let record_batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(arrow_array)]).unwrap();
+        return self.evaluate(record_batch);
+    }
+}
+
+fn get_string_needle(value: &ScalarValue) -> Option<&str> {
+    if let ScalarValue::Utf8(Some(v)) = value {
+        Some(v)
+    } else if let ScalarValue::Dictionary(_, value) = value {
+        if let ScalarValue::Utf8(Some(v)) = value.as_ref() {
+            Some(v)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
 }
 
 impl ArrowPredicate for DatafusionArrowPredicate {
@@ -202,69 +299,7 @@ impl ArrowPredicate for DatafusionArrowPredicate {
         }
 
         if let Some(array) = input.downcast_ref::<EtcArrayRef>() {
-            if let Some(binary_expr) =
-                self.physical_expr.as_any().downcast_ref::<BinaryExpr>()
-            {
-                if let Some(literal) =
-                    binary_expr.right().as_any().downcast_ref::<Literal>()
-                {
-                    let op = binary_expr.op();
-                    if let Some(array) = array.as_string_array_opt() {
-                        if op == &Operator::Eq {
-                            if let ScalarValue::Utf8(Some(v)) = literal.value() {
-                                let result = array.compare_equals(&v);
-                                return Ok(result);
-                            };
-                        } else if op == &Operator::NotEq {
-                            if let ScalarValue::Utf8(Some(v)) = literal.value() {
-                                let result = array.compare_not_equals(&v);
-                                return Ok(result);
-                            };
-                        }
-
-                        let dict_array = array.to_dict_string();
-                        let lhs = ColumnarValue::Array(Arc::new(dict_array));
-                        let rhs = ColumnarValue::Scalar(literal.value().clone());
-
-                        let result = match op {
-                            Operator::NotEq => apply_cmp(&lhs, &rhs, kernels::cmp::neq),
-                            Operator::Eq => apply_cmp(&lhs, &rhs, kernels::cmp::eq),
-                            Operator::Lt => apply_cmp(&lhs, &rhs, kernels::cmp::lt),
-                            Operator::LtEq => apply_cmp(&lhs, &rhs, kernels::cmp::lt_eq),
-                            Operator::Gt => apply_cmp(&lhs, &rhs, kernels::cmp::gt),
-                            Operator::GtEq => apply_cmp(&lhs, &rhs, kernels::cmp::gt_eq),
-                            Operator::LikeMatch => {
-                                apply_cmp(&lhs, &rhs, arrow::compute::like)
-                            }
-                            Operator::ILikeMatch => {
-                                apply_cmp(&lhs, &rhs, arrow::compute::ilike)
-                            }
-                            Operator::NotLikeMatch => {
-                                apply_cmp(&lhs, &rhs, arrow::compute::nlike)
-                            }
-                            Operator::NotILikeMatch => {
-                                apply_cmp(&lhs, &rhs, arrow::compute::nilike)
-                            }
-                            _ => panic!("unsupported operator: {:?}", op),
-                        };
-                        if let Ok(result) = result {
-                            let filtered =
-                                result.into_array(array.len())?.as_boolean().clone();
-                            return Ok(filtered);
-                        }
-                    }
-                }
-            }
-            let arrow_array = array.to_arrow_array();
-            let schema = Schema::new(vec![Field::new(
-                "",
-                arrow_array.data_type().clone(),
-                arrow_array.is_nullable(),
-            )]);
-            let record_batch =
-                RecordBatch::try_new(Arc::new(schema), vec![Arc::new(arrow_array)])
-                    .unwrap();
-            return self.evaluate(record_batch);
+            return self.evaluate_etc_array(array);
         }
 
         if let Some(array) = input.downcast_ref::<vortex::Array>() {
