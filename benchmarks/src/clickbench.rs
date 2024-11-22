@@ -29,6 +29,8 @@ use datafusion::execution::cache::cache_unit::Cache37;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::physical_plan::collect;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::ExecutionPlanVisitor;
 use datafusion::prelude::ParquetReadOptions;
 use datafusion::{
     error::{DataFusionError, Result},
@@ -38,6 +40,7 @@ use datafusion_common::exec_datafusion_err;
 use datafusion_common::instant::Instant;
 use datafusion_flight_table::sql::FlightSqlDriver;
 use datafusion_flight_table::sql::USERNAME;
+use datafusion_flight_table::FlightExec;
 use datafusion_flight_table::FlightTableFactory;
 use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
@@ -229,6 +232,7 @@ impl RunOpt {
                         pretty::print_batches(&result)?;
                     }
                 }
+
                 let elapsed = start.elapsed();
                 let ms = elapsed.as_secs_f64() * 1000.0;
                 let row_count: usize = result.iter().map(|b| b.num_rows()).sum();
@@ -297,10 +301,17 @@ impl RunOpt {
                     }
                 }
 
-                benchmark_run.write_iter(
+                let mut metrics_visitor = ExecutionPlanMetricCollector::new();
+                datafusion::physical_plan::visit_execution_plan(
+                    physical_plan.as_ref(),
+                    &mut metrics_visitor,
+                )?;
+
+                benchmark_run.write_iter_with_metrics(
                     elapsed,
                     row_count,
                     Cache37::consume_bytes_read(),
+                    metrics_visitor.into_hashmap(),
                 );
             }
         }
@@ -373,5 +384,42 @@ impl RunOpt {
                     })
             }
         }
+    }
+}
+
+struct ExecutionPlanMetricCollector {
+    metrics: HashMap<String, usize>,
+}
+
+impl ExecutionPlanMetricCollector {
+    fn new() -> Self {
+        Self {
+            metrics: HashMap::new(),
+        }
+    }
+
+    fn into_hashmap(self) -> HashMap<String, usize> {
+        self.metrics
+    }
+}
+
+impl ExecutionPlanVisitor for ExecutionPlanMetricCollector {
+    type Error = DataFusionError;
+
+    fn pre_visit(&mut self, plan: &dyn ExecutionPlan) -> Result<bool> {
+        if let Some(_flight_exec) = plan.as_any().downcast_ref::<FlightExec>() {
+            if let Some(metrics) = plan.metrics() {
+                let agg = metrics.aggregate_by_name().timestamps_removed();
+                for m in agg.iter() {
+                    self.metrics
+                        .insert(m.value().name().to_string(), m.value().as_usize());
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    fn post_visit(&mut self, _plan: &dyn ExecutionPlan) -> Result<bool> {
+        Ok(true)
     }
 }

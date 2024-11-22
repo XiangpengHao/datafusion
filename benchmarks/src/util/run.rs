@@ -85,6 +85,7 @@ struct QueryIter {
     elapsed: Duration,
     row_count: usize,
     parquet_cache_bytes_read: usize,
+    customized_metrics: Option<HashMap<String, usize>>,
 }
 /// A single benchmark case
 #[derive(Debug, Serialize)]
@@ -148,6 +149,26 @@ impl BenchmarkRun {
                 elapsed,
                 row_count,
                 parquet_cache_bytes_read,
+                customized_metrics: None,
+            })
+        } else {
+            panic!("no cases existed yet");
+        }
+    }
+
+    pub fn write_iter_with_metrics(
+        &mut self,
+        elapsed: Duration,
+        row_count: usize,
+        parquet_cache_bytes_read: usize,
+        customized_metrics: HashMap<String, usize>,
+    ) {
+        if let Some(idx) = self.current_case {
+            self.queries[idx].iterations.push(QueryIter {
+                elapsed,
+                row_count,
+                parquet_cache_bytes_read,
+                customized_metrics: Some(customized_metrics),
             })
         } else {
             panic!("no cases existed yet");

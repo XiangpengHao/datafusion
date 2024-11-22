@@ -49,7 +49,7 @@ use tonic::metadata::{AsciiMetadataKey, MetadataMap};
 
 /// Arrow Flight physical plan that maps flight endpoints to partitions
 #[derive(Clone, Debug)]
-pub(crate) struct FlightExec {
+pub struct FlightExec {
     config: FlightConfig,
     plan_properties: PlanProperties,
     metadata_map: Arc<MetadataMap>,
@@ -348,6 +348,9 @@ impl Stream for FlightStream {
         match result {
             Poll::Ready(Some(Ok(batch))) => {
                 self.metrics.output_rows.add(batch.num_rows());
+                self.metrics
+                    .bytes_transferred
+                    .add(batch.get_array_memory_size());
                 let new_batch = self.schema_mapper.map_batch(batch).unwrap();
                 return Poll::Ready(Some(Ok(new_batch)));
             }
