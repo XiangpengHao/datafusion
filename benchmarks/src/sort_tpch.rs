@@ -176,7 +176,7 @@ impl RunOpt {
 
             let query_results = self.benchmark_query(query_id).await?;
             for iter in query_results {
-                benchmark_run.write_iter(iter.elapsed, iter.row_count);
+                benchmark_run.write_iter(iter.elapsed, iter.row_count, 0);
             }
         }
 

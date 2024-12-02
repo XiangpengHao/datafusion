@@ -21,10 +21,9 @@ use std::sync::{Arc, LazyLock, RwLock};
 
 use crate::cache::CacheAccessor;
 
-use datafusion_common::Statistics;
+use datafusion_common::{HashMap, Statistics};
 
 use dashmap::DashMap;
-use hashbrown::HashMap;
 use object_store::path::Path;
 use object_store::ObjectMeta;
 

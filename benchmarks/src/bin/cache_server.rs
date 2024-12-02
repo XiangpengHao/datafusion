@@ -32,6 +32,7 @@ use dashmap::DashMap;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
+use datafusion_common::utils::get_available_parallelism;
 use datafusion_flight_table::GcStream;
 use futures::{Stream, TryStreamExt};
 use log::{debug, info};
@@ -87,7 +88,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut session_config = SessionConfig::from_env()
         .map_err(|e| Status::internal(format!("Error building plan: {e}")))?
         .with_information_schema(true)
-        .with_target_partitions(options.partitions.unwrap_or(num_cpus::get()));
+        .with_target_partitions(
+            options.partitions.unwrap_or(get_available_parallelism()),
+        );
 
     session_config
         .options_mut()

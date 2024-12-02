@@ -17,7 +17,7 @@
 
 use datafusion::{error::Result, DATAFUSION_VERSION};
 use datafusion_common::utils::get_available_parallelism;
-use parquet::arrow::builder::ArrowCacheStatistics;
+use parquet::arrow::arrow_cache::ArrowCacheStatistics;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use std::{

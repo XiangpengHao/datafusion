@@ -46,7 +46,6 @@ env_logger = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
 mimalloc = { version = "0.1", optional = true, default-features = false }
-num_cpus = { workspace = true }
 object_store = { workspace = true, features = ["aws"] }
 parquet = { workspace = true, default-features = true }
 pprof = { version = "0.13", features = ["flamegraph"] }
