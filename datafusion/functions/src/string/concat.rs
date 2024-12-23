@@ -17,6 +17,7 @@
 
 use arrow::array::{as_largestring_array, Array};
 use arrow::datatypes::DataType;
+use datafusion_expr::sort_properties::ExprProperties;
 use std::any::Any;
 use std::sync::{Arc, OnceLock};
 
@@ -265,6 +266,10 @@ impl ScalarUDFImpl for ConcatFunc {
     fn documentation(&self) -> Option<&Documentation> {
         Some(get_concat_doc())
     }
+
+    fn preserves_lex_ordering(&self, _inputs: &[ExprProperties]) -> Result<bool> {
+        Ok(true)
+    }
 }
 
 static DOCUMENTATION: OnceLock<Documentation> = OnceLock::new();
@@ -388,7 +393,7 @@ mod tests {
     fn test_functions() -> Result<()> {
         test_function!(
             ConcatFunc::new(),
-            &[
+            vec![
                 ColumnarValue::Scalar(ScalarValue::from("aa")),
                 ColumnarValue::Scalar(ScalarValue::from("bb")),
                 ColumnarValue::Scalar(ScalarValue::from("cc")),
@@ -400,7 +405,7 @@ mod tests {
         );
         test_function!(
             ConcatFunc::new(),
-            &[
+            vec![
                 ColumnarValue::Scalar(ScalarValue::from("aa")),
                 ColumnarValue::Scalar(ScalarValue::Utf8(None)),
                 ColumnarValue::Scalar(ScalarValue::from("cc")),
@@ -412,7 +417,7 @@ mod tests {
         );
         test_function!(
             ConcatFunc::new(),
-            &[ColumnarValue::Scalar(ScalarValue::Utf8(None))],
+            vec![ColumnarValue::Scalar(ScalarValue::Utf8(None))],
             Ok(Some("")),
             &str,
             Utf8,
@@ -420,7 +425,7 @@ mod tests {
         );
         test_function!(
             ConcatFunc::new(),
-            &[
+            vec![
                 ColumnarValue::Scalar(ScalarValue::from("aa")),
                 ColumnarValue::Scalar(ScalarValue::Utf8View(None)),
                 ColumnarValue::Scalar(ScalarValue::LargeUtf8(None)),
@@ -433,7 +438,7 @@ mod tests {
         );
         test_function!(
             ConcatFunc::new(),
-            &[
+            vec![
                 ColumnarValue::Scalar(ScalarValue::from("aa")),
                 ColumnarValue::Scalar(ScalarValue::LargeUtf8(None)),
                 ColumnarValue::Scalar(ScalarValue::from("cc")),
@@ -445,7 +450,7 @@ mod tests {
         );
         test_function!(
             ConcatFunc::new(),
-            &[
+            vec![
                 ColumnarValue::Scalar(ScalarValue::Utf8View(Some("aa".to_string()))),
                 ColumnarValue::Scalar(ScalarValue::Utf8(Some("cc".to_string()))),
             ],

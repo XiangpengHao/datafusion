@@ -303,6 +303,10 @@ impl ScalarUDF {
         self.inner.output_ordering(inputs)
     }
 
+    pub fn preserves_lex_ordering(&self, inputs: &[ExprProperties]) -> Result<bool> {
+        self.inner.preserves_lex_ordering(inputs)
+    }
+
     /// See [`ScalarUDFImpl::coerce_types`] for more details.
     pub fn coerce_types(&self, arg_types: &[DataType]) -> Result<Vec<DataType>> {
         self.inner.coerce_types(arg_types)
@@ -326,13 +330,15 @@ where
     }
 }
 
+/// Arguments passed to [`ScalarUDFImpl::invoke_with_args`] when invoking a
+/// scalar function.
 pub struct ScalarFunctionArgs<'a> {
-    // The evaluated arguments to the function
-    pub args: &'a [ColumnarValue],
-    // The number of rows in record batch being evaluated
+    /// The evaluated arguments to the function
+    pub args: Vec<ColumnarValue>,
+    /// The number of rows in record batch being evaluated
     pub number_rows: usize,
-    // The return type of the scalar function returned (from `return_type` or `return_type_from_exprs`)
-    // when creating the physical expression from the logical expression
+    /// The return type of the scalar function returned (from `return_type` or `return_type_from_exprs`)
+    /// when creating the physical expression from the logical expression
     pub return_type: &'a DataType,
 }
 
@@ -539,7 +545,7 @@ pub trait ScalarUDFImpl: Debug + Send + Sync {
     /// [`ColumnarValue::values_to_arrays`] can be used to convert the arguments
     /// to arrays, which will likely be simpler code, but be slower.
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
-        self.invoke_batch(args.args, args.number_rows)
+        self.invoke_batch(&args.args, args.number_rows)
     }
 
     /// Invoke the function without `args`, instead the number of rows are provided,
@@ -648,10 +654,30 @@ pub trait ScalarUDFImpl: Debug + Send + Sync {
         Ok(Some(vec![]))
     }
 
-    /// Calculates the [`SortProperties`] of this function based on its
-    /// children's properties.
-    fn output_ordering(&self, _inputs: &[ExprProperties]) -> Result<SortProperties> {
-        Ok(SortProperties::Unordered)
+    /// Calculates the [`SortProperties`] of this function based on its children's properties.
+    fn output_ordering(&self, inputs: &[ExprProperties]) -> Result<SortProperties> {
+        if !self.preserves_lex_ordering(inputs)? {
+            return Ok(SortProperties::Unordered);
+        }
+
+        let Some(first_order) = inputs.first().map(|p| &p.sort_properties) else {
+            return Ok(SortProperties::Singleton);
+        };
+
+        if inputs
+            .iter()
+            .skip(1)
+            .all(|input| &input.sort_properties == first_order)
+        {
+            Ok(*first_order)
+        } else {
+            Ok(SortProperties::Unordered)
+        }
+    }
+
+    /// Whether the function preserves lexicographical ordering based on the input ordering
+    fn preserves_lex_ordering(&self, _inputs: &[ExprProperties]) -> Result<bool> {
+        Ok(false)
     }
 
     /// Coerce arguments of a function call to types that the function can evaluate.
@@ -805,6 +831,10 @@ impl ScalarUDFImpl for AliasedScalarUDFImpl {
 
     fn output_ordering(&self, inputs: &[ExprProperties]) -> Result<SortProperties> {
         self.inner.output_ordering(inputs)
+    }
+
+    fn preserves_lex_ordering(&self, inputs: &[ExprProperties]) -> Result<bool> {
+        self.inner.preserves_lex_ordering(inputs)
     }
 
     fn coerce_types(&self, arg_types: &[DataType]) -> Result<Vec<DataType>> {

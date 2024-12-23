@@ -18,14 +18,14 @@
 use std::sync::Arc;
 
 use arrow_schema::TimeUnit;
+use datafusion_common::Result;
 use datafusion_expr::Expr;
 use regex::Regex;
+use sqlparser::tokenizer::Span;
 use sqlparser::{
     ast::{self, BinaryOperator, Function, Ident, ObjectName, TimezoneInfo},
     keywords::ALL_KEYWORDS,
 };
-
-use datafusion_common::Result;
 
 use super::{utils::character_length_to_sql, utils::date_part_to_sql, Unparser};
 
@@ -157,6 +157,15 @@ pub trait Dialect: Send + Sync {
     fn full_qualified_col(&self) -> bool {
         false
     }
+
+    /// Allow to unparse the unnest plan as [ast::TableFactor::UNNEST].
+    ///
+    /// Some dialects like BigQuery require UNNEST to be used in the FROM clause but
+    /// the LogicalPlan planner always puts UNNEST in the SELECT clause. This flag allows
+    /// to unparse the UNNEST plan as [ast::TableFactor::UNNEST] instead of a subquery.
+    fn unnest_as_table_factor(&self) -> bool {
+        false
+    }
 }
 
 /// `IntervalStyle` to use for unparsing
@@ -279,6 +288,7 @@ impl PostgreSqlDialect {
             name: ObjectName(vec![Ident {
                 value: func_name.to_string(),
                 quote_style: None,
+                span: Span::empty(),
             }]),
             args: ast::FunctionArguments::List(ast::FunctionArgumentList {
                 duplicate_treatment: None,
@@ -290,6 +300,7 @@ impl PostgreSqlDialect {
             over: None,
             within_group: vec![],
             parameters: ast::FunctionArguments::None,
+            uses_odbc_syntax: false,
         }))
     }
 }
@@ -448,6 +459,7 @@ pub struct CustomDialect {
     requires_derived_table_alias: bool,
     division_operator: BinaryOperator,
     full_qualified_col: bool,
+    unnest_as_table_factor: bool,
 }
 
 impl Default for CustomDialect {
@@ -474,6 +486,7 @@ impl Default for CustomDialect {
             requires_derived_table_alias: false,
             division_operator: BinaryOperator::Divide,
             full_qualified_col: false,
+            unnest_as_table_factor: false,
         }
     }
 }
@@ -582,6 +595,10 @@ impl Dialect for CustomDialect {
     fn full_qualified_col(&self) -> bool {
         self.full_qualified_col
     }
+
+    fn unnest_as_table_factor(&self) -> bool {
+        self.unnest_as_table_factor
+    }
 }
 
 /// `CustomDialectBuilder` to build `CustomDialect` using builder pattern
@@ -617,6 +634,7 @@ pub struct CustomDialectBuilder {
     requires_derived_table_alias: bool,
     division_operator: BinaryOperator,
     full_qualified_col: bool,
+    unnest_as_table_factor: bool,
 }
 
 impl Default for CustomDialectBuilder {
@@ -649,6 +667,7 @@ impl CustomDialectBuilder {
             requires_derived_table_alias: false,
             division_operator: BinaryOperator::Divide,
             full_qualified_col: false,
+            unnest_as_table_factor: false,
         }
     }
 
@@ -673,6 +692,7 @@ impl CustomDialectBuilder {
             requires_derived_table_alias: self.requires_derived_table_alias,
             division_operator: self.division_operator,
             full_qualified_col: self.full_qualified_col,
+            unnest_as_table_factor: self.unnest_as_table_factor,
         }
     }
 
@@ -798,6 +818,11 @@ impl CustomDialectBuilder {
     /// Customize the dialect to allow full qualified column names
     pub fn with_full_qualified_col(mut self, full_qualified_col: bool) -> Self {
         self.full_qualified_col = full_qualified_col;
+        self
+    }
+
+    pub fn with_unnest_as_table_factor(mut self, _unnest_as_table_factor: bool) -> Self {
+        self.unnest_as_table_factor = _unnest_as_table_factor;
         self
     }
 }

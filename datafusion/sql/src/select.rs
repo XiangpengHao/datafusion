@@ -38,6 +38,7 @@ use datafusion_expr::{
     qualified_wildcard_with_options, wildcard_with_options, Aggregate, Expr, Filter,
     GroupingSet, LogicalPlan, LogicalPlanBuilder, Partitioning,
 };
+
 use indexmap::IndexMap;
 use sqlparser::ast::{
     Distinct, Expr as SQLExpr, GroupByExpr, NamedWindowExpr, OrderByExpr,
@@ -654,6 +655,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
             opt_rename,
             opt_replace: _opt_replace,
             opt_ilike: _opt_ilike,
+            wildcard_token: _wildcard_token,
         } = options;
 
         if opt_rename.is_some() {
