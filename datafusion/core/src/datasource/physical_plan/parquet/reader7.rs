@@ -14,18 +14,18 @@ use super::ParquetFileReaderFactory;
 
 /// Doc
 #[derive(Debug)]
-pub struct Parquet7FileReaderFactory {
+pub struct ParquetMetadataCacheReaderFactory {
     store: Arc<dyn ObjectStore>,
 }
 
-impl Parquet7FileReaderFactory {
+impl ParquetMetadataCacheReaderFactory {
     /// Doc
     pub fn new(store: Arc<dyn ObjectStore>) -> Self {
         Self { store }
     }
 }
 
-impl ParquetFileReaderFactory for Parquet7FileReaderFactory {
+impl ParquetFileReaderFactory for ParquetMetadataCacheReaderFactory {
     fn create_reader(
         &self,
         partition_index: usize,
@@ -45,7 +45,7 @@ impl ParquetFileReaderFactory for Parquet7FileReaderFactory {
             inner = inner.with_footer_size_hint(hint)
         };
 
-        Ok(Box::new(Parquet7FileReader {
+        Ok(Box::new(ParquetMetadataCacheReader {
             inner,
             file_metrics,
         }))
@@ -53,14 +53,14 @@ impl ParquetFileReaderFactory for Parquet7FileReaderFactory {
 }
 
 /// doc
-pub struct Parquet7FileReader {
+pub struct ParquetMetadataCacheReader {
     /// doc
     pub file_metrics: ParquetFileMetrics,
     /// doc
     pub inner: ParquetObjectReader,
 }
 
-impl AsyncFileReader for Parquet7FileReader {
+impl AsyncFileReader for ParquetMetadataCacheReader {
     fn get_byte_ranges(
         &mut self,
         ranges: Vec<Range<usize>>,
@@ -105,18 +105,18 @@ impl AsyncFileReader for Parquet7FileReader {
 
 /// Doc
 #[derive(Debug)]
-pub struct Parquet8FileReaderFactory {
+pub struct ParquetByteCacheReaderFactory {
     store: Arc<dyn ObjectStore>,
 }
 
-impl Parquet8FileReaderFactory {
+impl ParquetByteCacheReaderFactory {
     /// Doc
     pub fn new(store: Arc<dyn ObjectStore>) -> Self {
         Self { store }
     }
 }
 
-impl ParquetFileReaderFactory for Parquet8FileReaderFactory {
+impl ParquetFileReaderFactory for ParquetByteCacheReaderFactory {
     fn create_reader(
         &self,
         partition_index: usize,
@@ -136,7 +136,7 @@ impl ParquetFileReaderFactory for Parquet8FileReaderFactory {
             inner = inner.with_footer_size_hint(hint)
         };
 
-        Ok(Box::new(Parquet7FileReader {
+        Ok(Box::new(ParquetByteCacheReader {
             inner,
             file_metrics,
         }))
@@ -144,14 +144,14 @@ impl ParquetFileReaderFactory for Parquet8FileReaderFactory {
 }
 
 /// doc
-pub struct Parquet8FileReader {
+pub struct ParquetByteCacheReader {
     /// doc
     pub file_metrics: ParquetFileMetrics,
     /// doc
     pub inner: ParquetObjectReader,
 }
 
-impl AsyncFileReader for Parquet8FileReader {
+impl AsyncFileReader for ParquetByteCacheReader {
     fn get_byte_ranges(
         &mut self,
         ranges: Vec<Range<usize>>,

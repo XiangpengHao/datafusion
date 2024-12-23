@@ -370,9 +370,9 @@ impl RunOpt {
                 };
 
                 let mut options: ParquetReadOptions<'_> = Default::default();
-                use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
+                use datafusion::datasource::physical_plan::parquet::ParquetByteCacheReaderFactory;
                 options.reader =
-                    Some(Arc::new(Parquet7FileReaderFactory::new(object_store)));
+                    Some(Arc::new(ParquetByteCacheReaderFactory::new(object_store)));
 
                 ctx.register_parquet("hits", &path, options)
                     .await

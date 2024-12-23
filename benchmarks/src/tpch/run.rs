@@ -31,7 +31,7 @@ use datafusion::datasource::file_format::FileFormat;
 use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
-use datafusion::datasource::physical_plan::parquet::Parquet7FileReaderFactory;
+use datafusion::datasource::physical_plan::parquet::ParquetMetadataCacheReaderFactory;
 use datafusion::datasource::{MemTable, TableProvider};
 use datafusion::error::Result;
 use datafusion::execution::cache::cache_unit::Cache37;
@@ -305,7 +305,7 @@ impl RunOpt {
                     let path = format!("{path}/{table}");
                     let url = ObjectStoreUrl::local_filesystem();
                     let object_store = ctx.runtime_env().object_store(url).unwrap();
-                    let factory = Parquet7FileReaderFactory::new(object_store);
+                    let factory = ParquetMetadataCacheReaderFactory::new(object_store);
                     let format = ParquetFormat::default()
                         .with_options(ctx.state().table_options().parquet.clone())
                         .with_reader(Arc::new(factory));

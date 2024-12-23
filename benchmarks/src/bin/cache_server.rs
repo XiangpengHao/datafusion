@@ -117,8 +117,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ctx.runtime_env().object_store(url).unwrap()
     };
     let mut parquet_options: ParquetReadOptions<'_> = Default::default();
-    use datafusion::datasource::physical_plan::parquet::Parquet8FileReaderFactory;
-    parquet_options.reader = Some(Arc::new(Parquet8FileReaderFactory::new(object_store)));
+    use datafusion::datasource::physical_plan::parquet::ParquetByteCacheReaderFactory;
+    parquet_options.reader = Some(Arc::new(ParquetByteCacheReaderFactory::new(object_store)));
 
     // register parquet file with the execution context
     ctx.register_parquet(&file_name, &options.path.to_string_lossy(), parquet_options)
