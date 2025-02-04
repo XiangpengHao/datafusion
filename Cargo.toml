@@ -189,3 +189,13 @@ large_futures = "warn"
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tarpaulin)"] }
 unused_qualifications = "deny"
+
+[patch.crates-io]
+arrow = { git = "https://github.com/XiangpengHao/arrow-rs.git", branch = "sota" }
+arrow-array = { git = "https://github.com/XiangpengHao/arrow-rs.git", branch = "sota" }
+arrow-buffer = { git = "https://github.com/XiangpengHao/arrow-rs.git", branch = "sota" }
+arrow-flight = { git = "https://github.com/XiangpengHao/arrow-rs.git", branch = "sota" }
+arrow-ipc = { git = "https://github.com/XiangpengHao/arrow-rs.git", branch = "sota" }
+arrow-ord = { git = "https://github.com/XiangpengHao/arrow-rs.git", branch = "sota" }
+arrow-schema = { git = "https://github.com/XiangpengHao/arrow-rs.git", branch = "sota" }
+parquet = { git = "https://github.com/XiangpengHao/arrow-rs.git", branch = "sota" }
