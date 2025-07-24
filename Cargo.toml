@@ -159,7 +159,6 @@ parquet = { version = "55.2.0", default-features = false, features = [
     "arrow",
     "async",
     "object_store",
-    "encryption",
 ] }
 pbjson = { version = "0.7.0" }
 pbjson-types = "0.7"
